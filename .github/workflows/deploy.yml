@@ -2,6 +2,7 @@ name: Deploy Astro Blog
 
 on:
   push:
+    branches: [ master ]
   workflow_dispatch:
 
 permissions:
@@ -9,11 +10,13 @@ permissions:
   pages: write
   id-token: write
 
+concurrency:
+  group: "pages"
+  cancel-in-progress: true
+
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
     steps:
       - uses: actions/checkout@v4
 
@@ -21,3 +24,11 @@ jobs:
         with:
           node-version: 20
           path: .
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+    steps:
+      - uses: actions/deploy-pages@v4
