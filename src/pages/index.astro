@@ -1,49 +1,134 @@
 ---
-import BaseHead from '../components/BaseHead.astro';
-import Footer from '../components/Footer.astro';
-import Header from '../components/Header.astro';
-import { SITE_DESCRIPTION, SITE_TITLE } from '../consts';
+import BaseHead from "../components/BaseHead.astro";
+import Footer from "../components/Footer.astro";
+import Header from "../components/Header.astro";
+import { SITE_DESCRIPTION, SITE_TITLE } from "../consts";
 ---
 
 <!doctype html>
 <html lang="en">
-	<head>
-		<BaseHead title={SITE_TITLE} description={SITE_DESCRIPTION} />
-	</head>
-	<body>
-		<Header />
-		<main>
-			<h1>🧑‍🚀 Hello, Astronaut!</h1>
-			<p>
-				Welcome to the official <a href="https://astro.build/">Astro</a> blog starter template. This template
-				serves as a lightweight, minimally-styled starting point for anyone looking to build a personal
-				website, blog, or portfolio with Astro.
-			</p>
-			<p>
-				This template comes with a few integrations already configured in your
-				<code>astro.config.mjs</code> file. You can customize your setup with
-				<a href="https://astro.build/integrations">Astro Integrations</a> to add tools like Tailwind,
-				React, or Vue to your project.
-			</p>
-			<p>Here are a few ideas on how to get started with the template:</p>
-			<ul>
-				<li>Edit this page in <code>src/pages/index.astro</code></li>
-				<li>Edit the site header items in <code>src/components/Header.astro</code></li>
-				<li>Add your name to the footer in <code>src/components/Footer.astro</code></li>
-				<li>Check out the included blog posts in <code>src/content/blog/</code></li>
-				<li>Customize the blog post page layout in <code>src/layouts/BlogPost.astro</code></li>
-			</ul>
-			<p>
-				Have fun! If you get stuck, remember to
-				<a href="https://docs.astro.build/">read the docs</a>
-				or <a href="https://astro.build/chat">join us on Discord</a> to ask questions.
-			</p>
-			<p>
-				Looking for a blog template with a bit more personality? Check out
-				<a href="https://github.com/Charca/astro-blog-template">astro-blog-template</a>
-				by <a href="https://twitter.com/Charca">Maxi Ferreira</a>.
-			</p>
-		</main>
-		<Footer />
-	</body>
+  <head>
+    <BaseHead title={SITE_TITLE} description={SITE_DESCRIPTION} />
+  </head>
+  <body>
+    <Header />
+    <main class="main-content">
+      <section class="hero">
+        <h1>Welcome 👋</h1>
+        <p>
+          Hi, I’m <strong>Koustubh Badshah</strong> — a computer science enthusiast
+          with a strong interest in cybersecurity, systems, and hands-on problem solving.
+          This blog is my personal space to document what I learn, build, break, and
+          understand along the way.
+        </p>
+      </section>
+
+      <section class="about">
+        <h2>About Me</h2>
+        <p>
+          I believe the best way to learn computer science is by doing. Most of
+          my learning comes from practical challenges, experiments, and
+          real-world simulations rather than just theory. I actively work on
+          platforms like Hack The Box (HTB), exploring networks, operating
+          systems, authentication mechanisms, and security misconfigurations.
+        </p>
+
+        <p>
+          I enjoy digging deep into how things work under the hood — whether
+          it’s Linux internals, networking protocols, web technologies, or
+          security tooling. When something breaks, I like to trace it back to <em
+            >why</em
+          > it broke, not just how to fix it.
+        </p>
+      </section>
+
+      <section class="projects">
+        <h2>Building & Creating</h2>
+        <p>
+          Alongside learning and writing, I enjoy building projects and
+          experimenting with new software. Creating things from scratch helps me
+          connect concepts across different areas of computer science and turn
+          abstract ideas into something real and usable.
+        </p>
+
+        <p>
+          My projects often involve a mix of security, backend systems,
+          networking, automation, and modern web technologies. Whether it’s a
+          small tool, a lab setup, or a full application, I focus on writing
+          clean, understandable, and purposeful code.
+        </p>
+      </section>
+
+      <section class="blogs">
+        <h2>What You’ll Find Here</h2>
+        <p>
+          This blog primarily focuses on <strong>CTF writeups</strong> and <strong
+            >technical content</strong
+          >
+          across different areas of computer science. Each post is written with clarity
+          and learning in mind — both for my future self and for anyone walking a
+          similar path.
+        </p>
+
+        <ul>
+          <li>
+            <strong>CTF & HTB Writeups</strong> – Step-by-step breakdowns of challenges,
+            covering enumeration, exploitation, misconfigurations, and lessons learned
+            (only for retired or allowed machines).
+          </li>
+          <li>
+            <strong>Cybersecurity Concepts</strong> – Networking, Wi-Fi security,
+            authentication protocols, Linux security, and practical attack/defense
+            techniques.
+          </li>
+          <li>
+            <strong>Technical Deep Dives</strong> – Clear explanations of tools, commands,
+            workflows, and system behavior.
+          </li>
+          <li>
+            <strong>General Computer Science</strong> – Topics that spark curiosity
+            across software, systems, and infrastructure.
+          </li>
+        </ul>
+      </section>
+
+      <section class="philosophy">
+        <h2>Why I Write</h2>
+        <p>
+          Writing helps me solidify my understanding and track my growth over
+          time. Instead of just solving a challenge and moving on, I document
+          the reasoning, mistakes, and insights that matter.
+        </p>
+
+        <p>
+          If you’re a student, beginner, or someone transitioning into
+          cybersecurity or deeper technical roles, I hope these posts help you
+          think more clearly and approach problems with confidence.
+        </p>
+      </section>
+
+      <section class="contact">
+        <h2>Communicate With Me</h2>
+        <p>
+          If you’d like to discuss a post, ask a question, collaborate on a
+          project, or just have a technical conversation, feel free to reach
+          out. I’m always open to learning from others and exchanging ideas.
+        </p>
+
+        <div class="contact-cta">
+          <a href="https://frustateduser.github.io/koustubh.github.io/#/contact" target="_blank" class="contact-button"> Get in Touch → </a>
+        </div>
+      </section>
+
+      <section class="closing">
+        <p>
+          Thanks for stopping by. Feel free to explore the posts, learn
+          something new, or use these writeups as a reference in your own
+          journey. Donn't forget to support me by sharing the blog and <a href="https://www.buymeacoffee.com/koustubhbadshah" target="_blank">buy me a coffee!</a>
+        </p>
+      </section>
+    </main>
+
+    <Footer />
+  </body>
 </html>
