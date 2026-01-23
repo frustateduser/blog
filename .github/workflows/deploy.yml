@@ -1,3 +1,5 @@
+import { cache, version } from "react"
+
 name: Deploy Astro Blog
 
 on:
@@ -9,6 +11,10 @@ permissions:
   pages: write
   id-token: write
 
+concurrency:
+  group: "pages"
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -17,11 +23,20 @@ jobs:
 
       - uses: withastro/action@v2
         with:
-          path: .
-          node-version: 18
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+      - run: npm run build
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
 
   deploy:
     needs: build
     runs-on: ubuntu-latest
+    environment:
+      name: github-pages
     steps:
       - uses: actions/deploy-pages@v4
