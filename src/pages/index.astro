@@ -10,6 +10,11 @@ import MatrixBackground from "../components/MatrixBackground.astro";
 <html lang="en">
   <head>
     <BaseHead title={SITE_TITLE} description={SITE_DESCRIPTION} />
+    <style>
+      main{
+        opacity: 0.8;
+      }
+    </style>
   </head>
   <body>
     <MatrixBackground client:load/>
