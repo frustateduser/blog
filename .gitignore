@@ -27,4 +27,5 @@ pnpm-debug.log*
 # leaving this here for reference
 using-mdx.mdx
 
-*active.mdx # Ignore all active.mdx files to accidentally committing them (active machines)
+# Ignore all active.mdx files to accidentally committing them (active machines)
+*active.mdx
