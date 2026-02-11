@@ -9,12 +9,12 @@ import MatrixBackground from "../components/MatrixBackground.astro";
 
 type Props = CollectionEntry<"blog">["data"];
 
-const { title, description, pubDate, updatedDate, heroImage } = Astro.props;
+const { title, description, pubDate, updatedDate, heroImage, author, tags } = Astro.props;
 ---
 
 <html lang="en">
   <head>
-    <BaseHead title={title} description={description} />
+    <BaseHead title={title} description={description} author={author} tags={tags} image={heroImage} />
     <style>
       main {
         width: calc(100% - 2em);
@@ -55,6 +55,18 @@ const { title, description, pubDate, updatedDate, heroImage } = Astro.props;
       .title h1 {
         margin: 0 0 0.5em 0;
       }
+      .post-meta {
+        display: flex;
+        gap: 0.5rem;
+        justify-content: center;
+        align-items: center;
+        margin-bottom: 0.5rem;
+      }
+      .post-meta .author {
+        color: rgb(var(--gray));
+        font-size: 0.95rem;
+      }
+     
       .date {
         margin-bottom: 0.5em;
         color: rgb(var(--gray));
@@ -90,6 +102,9 @@ const { title, description, pubDate, updatedDate, heroImage } = Astro.props;
               }
             </div>
             <h1>{title}</h1>
+            <div class="post-meta">
+              <div class="author">By {author}</div>
+            </div>
             <hr />
           </div>
           <slot />

