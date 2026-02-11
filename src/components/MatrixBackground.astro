@@ -32,69 +32,77 @@
 <script>
   //@ts-nocheck
 
-  const canvas = document.getElementById("matrix-bg");
+  function initMatrix() {
+    const canvas = document.getElementById("matrix-bg");
+    if (!canvas) return;
 
-  if (!canvas) {
-    // do nothing
-  } else {
+    if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      // User prefers reduced motion; don't run the animation
+      return;
+    }
+
     /** @type {CanvasRenderingContext2D | null} */
     const ctx = canvas.getContext("2d");
+    if (!ctx) return;
 
-    if (!ctx) {
-      // do nothing
-    } else {
-      let width;
-      let height;
-      let columns;
+    let width;
+    let height;
+    let columns;
 
-      const fontSize = 20;
-      const speed = 0.4; // lower = slower
-      const fade = 0.05; // trail strength
-      const density = 10; // columns multiplier
+    const fontSize = 20;
+    const speed = 0.4; // lower = slower
+    const fade = 0.05; // trail strength
+    const density = 10; // columns multiplier
 
-      /** @type {string[]} */
-      const chars =
-        "ऍॅ्रर्ज्ज्ञत्रक्षश्रःऋ0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ!@#$%^&*+-.?;'<>`~ौैाीूबहगदजड़ॉोेे्िुपरकतचटॆंमनवलसऔऐआईऊभङघधझढञओएअइउफऱखथछठऎँणऩऴळशष।य़ौैぁあぃいぅうぇえぉおかがきぎくぐけげこごさざしじすずせぜそぞただちぢっつづてでとどなにぬねのはばぱひびぴふぶぷへべぺほぼぽまみむめもゃやゅゆょよらりるれろゎわゐゑをんゔゕゖ゗゘゙゚゛゜ゝゞゟ゠ァアィイゥウェエォオカガキギクグケゲコゴサザシジスズセゼソゾタダチヂッツヅテデトドナニヌネノハバパヒビピフブプヘベペホボポマミムメモャヤュユョヨラリルレロヮワヰヱヲンヴヵヶヷヸヹヺ・ーヽヾヿㇰㇱㇲㇳㇴㇵㇶㇷ".split(
-          "",
-        );
+    /** @type {string[]} */
+    const chars =
+      "ऍॅ्रर्ज्ज्ञत्रक्षश्रःऋ0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ!@#$%^&*+-.?;'<>`~ौैाीूबहगदजड़ॉोेे्िुपरकतचटॆंमनवलसऔऐआईऊभङघधझढञओएअइउफऱखथछठऎँणऩऴळशष।य़ौैぁあぃいぅうぇえぉおかがきぎくぐけげこごさざしじすずせぜそぞただちぢっつづてでとどなにぬねのはばぱひびぴふぶぷへべぺほぼぽまみむめもゃやゅゆょよらりるれろゎわゐゑをんゔゕゖ゗゘゙゚゛゜ゝゞゟ゠ァアィイゥウェエォオカガキギクグケゲコゴサザシジスズセゼソゾタダチヂッツヅテデトドナニヌネノハバパヒビピフブプヘベペホボポマミムメモャヤュユョヨラリルレロヮワヰヱヲンヴヵヶヷヸヹヺ・ーヽヾヿㇰㇱㇲㇳㇴㇵㇶㇷ".split(
+        "",
+      );
 
-      /** @type {number[]} */
-      const drops = [];
+    /** @type {number[]} */
+    const drops = [];
 
-      function resize() {
-        width = canvas.width = window.innerWidth;
-        height = canvas.height = window.innerHeight;
-        columns = Math.floor((width / fontSize) * density);
+    function resize() {
+      width = canvas.width = window.innerWidth;
+      height = canvas.height = window.innerHeight;
+      columns = Math.floor((width / fontSize) * density);
 
-        drops.length = columns;
-        for (let i = 0; i < columns; i++) {
-          drops[i] = Math.random() * height;
-        }
+      drops.length = columns;
+      for (let i = 0; i < columns; i++) {
+        drops[i] = Math.random() * height;
       }
-
-      resize();
-      window.addEventListener("resize", resize);
-
-      function draw() {
-        ctx.fillStyle = `rgba(0, 0, 0, ${fade})`;
-        ctx.fillRect(0, 0, width, height);
-
-        ctx.font = `${fontSize}px`;
-        ctx.fillStyle = "#00ff88";
-
-        for (let i = 0; i < drops.length; i++) {
-          const text = chars[Math.floor(Math.random() * chars.length)];
-          ctx.fillText(text, i * fontSize, drops[i] * fontSize);
-
-          if (drops[i] * fontSize > height && Math.random() > 0.98) {
-            drops[i] = 0;
-          }
-          drops[i] += speed;
-        }
-        requestAnimationFrame(draw);
-      }
-
-      draw();
     }
+
+    resize();
+    window.addEventListener("resize", resize);
+
+    function draw() {
+      ctx.fillStyle = `rgba(0, 0, 0, ${fade})`;
+      ctx.fillRect(0, 0, width, height);
+
+      ctx.font = `${fontSize}px`;
+      ctx.fillStyle = "#00ff88";
+
+      for (let i = 0; i < drops.length; i++) {
+        const text = chars[Math.floor(Math.random() * chars.length)];
+        ctx.fillText(text, i * fontSize, drops[i] * fontSize);
+
+        if (drops[i] * fontSize > height && Math.random() > 0.98) {
+          drops[i] = 0;
+        }
+        drops[i] += speed;
+      }
+      requestAnimationFrame(draw);
+    }
+
+    draw();
+  }
+
+  // Defer expensive work until the browser is idle to reduce main-thread contention
+  if ('requestIdleCallback' in window) {
+    requestIdleCallback(initMatrix, { timeout: 2000 });
+  } else {
+    setTimeout(initMatrix, 1500);
   }
 </script>
